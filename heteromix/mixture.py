@@ -10,11 +10,11 @@ class par_model:
     Class to store a parametric model.
     
     Arguments:
-        :callable model: pdf of the model
+        :callable model: model pdf
         :iterable pars:  parameters of the model
     
     Returns:
-        :mixture: instance of model class
+        :par_model: instance of model class
     """
     def __init__(self, model, pars):
         self.model = model
@@ -24,9 +24,9 @@ class par_model:
         return self.pdf(x)
 
     def pdf(self, x):
-        return self.model(x, *pars)
+        return self.model(x, *self.pars)
 
-class mixture:
+class het_mixture:
     """
     Class to store a single draw from HMM.
     
@@ -36,7 +36,7 @@ class mixture:
         :np.ndarray:               weights
         
     Returns:
-        :mixture: instance of mixture class
+        :het_mixture: instance of het_mixture class
     """
     def __init__(self, models, weights):
         self.models  = models
@@ -81,10 +81,10 @@ class HMM:
         self.components   = [self.DPGMM] + self.par_models
         self.n_components = len(models) + 1
         
-        self.n_pts = np.zeros(self.n_models)
+        self.n_pts = np.zeros(self.n_components)
          
         if gamma0 is None:
-            self.gamma_0  = np.ones(self.n_components)/self.n_components
+            self.gamma0  = np.ones(self.n_components)/self.n_components
         else:
             gamma0 = np.array([gamma0])
             if len(gamma0) == self.n_components:
@@ -97,12 +97,12 @@ class HMM:
         return self.pdf(x)
     
     def initialise(self):
-        self.n_pts = np.zeros(self.n_models)
+        self.n_pts = np.zeros(self.n_components)
         self.w     = self.gamma0
     
     def _assign_to_component(self, x):
-        scores = np.zeros(self.n_models)
-        for i in enumerate(self.components):
+        scores = np.zeros(self.n_components)
+        for i in range(self.n_components):
             scores[i]  = self._log_predictive_likelihood(x, i)
             scores[i] += self.gamma0[i] + self.n_pts[i]
         scores = np.exp(scores - logsumexp(scores))
@@ -129,7 +129,10 @@ class HMM:
             scores = [score for score in scores.values()]
             return logsumexp(scores)
         else:
-            return np.log(self.components[i](x))
+            p = self.components[i](x)
+            if p == 0.:
+                return -np.inf
+            return np.log(p)
     
     def add_new_point(self, x):
         self._assign_to_component(np.atleast_2d(x))
@@ -151,5 +154,5 @@ class HMM:
             models = [par_models(uniform, [np.prod(np.diff(self.DPGMM.bounds, axis = 1))])] + self.par_models
         else:
             models = [self.DPGMM.build_mixture()] + self.par_models
-        return mixture(models, self.weights)
+        return het_mixture(models, self.weights)
         
