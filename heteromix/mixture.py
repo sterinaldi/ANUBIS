@@ -1,5 +1,6 @@
 import numpy as np
 from figaro.mixture import DPGMM
+from figaro.decorators import probit
 from scipy.special import logsumexp
 
 def uniform(x, v):
@@ -38,9 +39,10 @@ class het_mixture:
     Returns:
         :het_mixture: instance of het_mixture class
     """
-    def __init__(self, models, weights):
+    def __init__(self, models, weights, bounds):
         self.models  = models
         self.weights = weights
+        self.bounds  = bounds
     
     def __call__(self, x):
         return self.pdf(x)
@@ -77,7 +79,7 @@ class HMM:
             pars = [[] for _ in models]
         self.par_models = [par_model(mod, p) for mod, p in zip(models, pars)]
         self.DPGMM  = DPGMM(bounds = bounds, prior_pars = prior_pars, alpha0 = alpha0)
-        
+        self.bounds       = np.atleast_2d(bounds)
         self.components   = [self.DPGMM] + self.par_models
         self.n_components = len(models) + 1
         
@@ -104,7 +106,7 @@ class HMM:
         scores = np.zeros(self.n_components)
         for i in range(self.n_components):
             scores[i]  = self._log_predictive_likelihood(x, i)
-            scores[i] += self.gamma0[i] + self.n_pts[i]
+            scores[i] += np.log(self.gamma0[i] + self.n_pts[i])
         scores = np.exp(scores - logsumexp(scores))
         id = np.random.choice(self.n_components, p = scores)
         self.n_pts[id] += 1
@@ -115,24 +117,28 @@ class HMM:
     
     def _log_predictive_likelihood(self, x, i):
         if i == 0:
-            scores = {}
-            for i in list(np.arange(self.DPGMM.n_cl)) + ["new"]:
-                if i == "new":
-                    ss = "new"
-                else:
-                    ss = self.DPGMM.mixture[i]
-                scores[i] = self.DPGMM._log_predictive_likelihood(x, ss)
-                if ss == "new":
-                    scores[i] += np.log(self.DPGMM.alpha) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
-                else:
-                    scores[i] += np.log(ss.N) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
-            scores = [score for score in scores.values()]
-            return logsumexp(scores)
+            return self._log_predictive_mixture(x)
         else:
-            p = self.components[i](x)
+            p = self.components[i].pdf(x)
             if p == 0.:
                 return -np.inf
             return np.log(p)
+    
+    @probit
+    def _log_predictive_mixture(self,x):
+        scores = {}
+        for i in list(np.arange(self.DPGMM.n_cl)) + ["new"]:
+            if i == "new":
+                ss = "new"
+            else:
+                ss = self.DPGMM.mixture[i]
+            scores[i] = self.DPGMM._log_predictive_likelihood(x, ss)
+            if ss == "new":
+                scores[i] += np.log(self.DPGMM.alpha) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
+            else:
+                scores[i] += np.log(ss.N) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
+        scores = [score for score in scores.values()]
+        return logsumexp(scores)
     
     def add_new_point(self, x):
         self._assign_to_component(np.atleast_2d(x))
@@ -151,8 +157,8 @@ class HMM:
     
     def build_mixture(self):
         if self.DPGMM.n_pts == 0:
-            models = [par_models(uniform, [np.prod(np.diff(self.DPGMM.bounds, axis = 1))])] + self.par_models
+            models = [par_model(uniform, [1./np.prod(np.diff(self.DPGMM.bounds, axis = 1))])] + self.par_models
         else:
             models = [self.DPGMM.build_mixture()] + self.par_models
-        return het_mixture(models, self.weights)
+        return het_mixture(models, self.weights, self.bounds)
         
