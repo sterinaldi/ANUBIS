@@ -1,6 +1,7 @@
 import numpy as np
 from figaro.mixture import DPGMM
 from figaro.decorators import probit
+from figaro.transform import probit_logJ
 from scipy.special import logsumexp
 
 def uniform(x, v):
@@ -17,9 +18,10 @@ class par_model:
     Returns:
         :par_model: instance of model class
     """
-    def __init__(self, model, pars):
-        self.model = model
-        self.pars  = pars
+    def __init__(self, model, pars, bounds):
+        self.model  = model
+        self.pars   = pars
+        self.bounds = bounds
     
     def __call__(self, x):
         return self.pdf(x)
@@ -71,13 +73,14 @@ class HMM:
     def __init__(self, models,
                        bounds,
                        pars = None,
+                       par_bounds = None,
                        prior_pars = None,
                        alpha0 = 1.,
                        gamma0 = None,
                        ):
         if pars == None:
             pars = [[] for _ in models]
-        self.par_models = [par_model(mod, p) for mod, p in zip(models, pars)]
+        self.par_models = [par_model(mod, p, bounds) for mod, p in zip(models, pars)]
         self.DPGMM  = DPGMM(bounds = bounds, prior_pars = prior_pars, alpha0 = alpha0)
         self.bounds       = np.atleast_2d(bounds)
         self.volume       = np.prod(np.diff(self.DPGMM.bounds, axis = 1))
@@ -140,7 +143,7 @@ class HMM:
             else:
                 scores[i] += np.log(ss.N) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
         scores = [score for score in scores.values()]
-        return logsumexp(scores)
+        return logsumexp(scores) - probit_logJ(x, self.bounds)
     
     def add_new_point(self, x):
         self._assign_to_component(np.atleast_2d(x))
@@ -159,7 +162,7 @@ class HMM:
     
     def build_mixture(self):
         if self.DPGMM.n_pts == 0:
-            models = [par_model(uniform, [1./self.volume])] + self.par_models
+            models = [par_model(uniform, [1./self.volume], self.bounds)] + self.par_models
         else:
             models = [self.DPGMM.build_mixture()] + self.par_models
         return het_mixture(models, self.weights, self.bounds)
