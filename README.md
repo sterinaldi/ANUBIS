@@ -1,4 +1,4 @@
-# Heterogeneous mixture model implementation
+# MUFFIN - Modelled-Unmodellend Fast & Flexible INference
 
 This code implements the inference of a multivariate probability density given a set of samples and an (incomplete) parametric model.
 The Heterogeneous Mixture Model, or HMM, is a finite mixture of parametric models augmented with DPGMM to capture the eventual features missed by the parametric model.
