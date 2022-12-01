@@ -28,6 +28,9 @@ class par_model:
 
     def pdf(self, x):
         return self.model(x, *self.pars)
+    
+    def pdf_pars(self, x, pars):
+        return self.model(x, *pars)
 
 class het_mixture:
     """
@@ -61,9 +64,11 @@ class HMM:
     Class to infer a distribution given a set of samples.
     
     Arguments:
-        :list-of-callbles: models
-        :iterable bounds:  boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
+        :list-of-callbles:    models
+        :iterable bounds:     boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
         :iterable prior_pars: NIW prior parameters (k, L, nu, mu)
+        :iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
+        :double n_draws:      number of draws for MC integral over parameters
         :double alpha0:       initial guess for concentration parameter
         :np.array gamma0:     Dirichlet Distribution prior
     
@@ -75,12 +80,22 @@ class HMM:
                        pars = None,
                        par_bounds = None,
                        prior_pars = None,
+                       n_draws = 1e3,
                        alpha0 = 1.,
                        gamma0 = None,
                        ):
-        if pars == None:
+                       
+        if pars is None:
             pars = [[] for _ in models]
+            self.n_draws = 0.
+        if par_bounds is not None:
+            self.par_bounds = np.atleast_3d(par_bounds).reshape(len(models), -1, 2)
+            self.n_draws = int(n_draws)
+                
         self.par_models = [par_model(mod, p, bounds) for mod, p in zip(models, pars)]
+        if self.par_bounds is not None:
+            self.par_draws  = np.atleast_2d([np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) for b in self.par_bounds])
+            self.total_p    = [np.zeros(self.n_draws) for _ in range(len(self.par_models))]
         self.DPGMM  = DPGMM(bounds = bounds, prior_pars = prior_pars, alpha0 = alpha0)
         self.bounds       = np.atleast_2d(bounds)
         self.volume       = np.prod(np.diff(self.DPGMM.bounds, axis = 1))
@@ -104,13 +119,18 @@ class HMM:
         return self.pdf(x)
     
     def initialise(self):
-        self.n_pts = np.zeros(self.n_components)
-        self.weights = self.gamma0/np.sum(self.gamma0)
+        self.n_pts     = np.zeros(self.n_components)
+        self.weights   = self.gamma0/np.sum(self.gamma0)
+        if self.par_bounds is not None:
+            self.par_draws = np.array([np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) for b in self.par_bounds])
+            self.total_p   = [np.zeros(self.n_draws) for _ in range(len(self.par_models))]
     
     def _assign_to_component(self, x):
         scores = np.zeros(self.n_components)
+        vals = np.zeros(shape = (self.n_components, self.n_draws))
         for i in range(self.n_components):
-            scores[i]  = self._log_predictive_likelihood(x, i)
+            score, vals[i] = self._log_predictive_likelihood(x, i)
+            scores[i]  = score
             scores[i] += np.log(self.gamma0[i] + self.n_pts[i])
         scores = np.exp(scores - logsumexp(scores))
         id = np.random.choice(self.n_components, p = scores)
@@ -119,15 +139,23 @@ class HMM:
         # If DPGMM, updates mixture
         if id == 0:
             self.DPGMM.add_new_point(x)
-    
+        # Parameter estimation
+        else:
+            self.total_p[i-1] += vals[i]
+        
     def _log_predictive_likelihood(self, x, i):
         if i == 0:
-            return self._log_predictive_mixture(x)
+            return self._log_predictive_mixture(x), np.zeros(self.n_draws)
         else:
-            p = self.components[i].pdf(x)
-            if p == 0.:
-                return -np.inf
-            return np.log(p)
+            if self.par_bounds is None:
+                p = self.components[i].pdf(x)
+                if p == 0.:
+                    return -np.inf, np.zeros(self.n_draws)
+                return np.log(p), np.zeros(self.n_draws)
+            else:
+                p = np.array([self.components[i].pdf_pars(x, pars) for pars in self.par_draws[i-1]]).flatten()
+                return np.log(np.sum(p)/self.n_draws), p
+
     
     @probit
     def _log_predictive_mixture(self, x):
@@ -161,6 +189,14 @@ class HMM:
         return np.array([wi*mi.pdf(x) for wi, mi in zip(self.weights, self.models)]).sum(axis = 0)
     
     def build_mixture(self):
+        if self.par_draws is not None:
+            for i in range(len(self.par_models)):
+                draws    = self.par_draws[i].T
+                vals     = self.total_p[i]/np.sum(self.total_p[i])
+                par_vals = np.array([np.sum(d*vals) for d in draws])
+                print(par_vals)
+                self.par_models[i].pars = par_vals
+
         if self.DPGMM.n_pts == 0:
             models = [par_model(uniform, [1./self.volume], self.bounds)] + self.par_models
         else:
