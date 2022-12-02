@@ -25,7 +25,7 @@ class build_ext(_build_ext):
         self.include_dirs.append(numpy.get_include())
 
 setup(
-    name = 'ANUBIS',
+    name = 'anubis',
     description = 'Astrophysical Nonparametrically Upgraded Bayesian Inference of Subpopulations',
     author = 'Stefano Rinaldi',
     author_email = 'stefano.rinaldi@phd.unipi.it',
