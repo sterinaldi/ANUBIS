@@ -25,15 +25,15 @@ class build_ext(_build_ext):
         self.include_dirs.append(numpy.get_include())
 
 setup(
-    name = 'muffin',
-    description = 'Heterogeneous mixture model',
+    name = 'ANUBIS',
+    description = 'Astrophysical Nonparametrically Upgraded Bayesian Inference of Subpopulations',
     author = 'Stefano Rinaldi',
     author_email = 'stefano.rinaldi@phd.unipi.it',
-    url = 'https://github.com/sterinaldi/muffin',
+    url = 'https://github.com/sterinaldi/ANUBIS',
     python_requires = '>=3.7',
-    packages = ['muffin'],
+    packages = ['anubis'],
     install_requires=requirements,
-    include_dirs = ['muffin', numpy.get_include()],
+    include_dirs = ['anubis', numpy.get_include()],
     setup_requires=['numpy', 'cython'],
     package_data={"": ['*.c', '*.pyx', '*.pxd']},
     )
