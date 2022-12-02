@@ -21,7 +21,8 @@ class par_model:
     def __init__(self, model, pars, bounds):
         self.model  = model
         self.pars   = pars
-        self.bounds = bounds
+        self.bounds = np.atleast_2d(bounds)
+        self.dim    = len(self.bounds)
     
     def __call__(self, x):
         return self.pdf(x)
@@ -47,7 +48,8 @@ class het_mixture:
     def __init__(self, models, weights, bounds):
         self.models  = models
         self.weights = weights
-        self.bounds  = bounds
+        self.bounds  = np.atleast_2d(bounds)
+        self.dim     = len(self.bounds)
     
     def __call__(self, x):
         return self.pdf(x)
