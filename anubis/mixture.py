@@ -12,8 +12,9 @@ class par_model:
     Class to store a parametric model.
     
     Arguments:
-        :callable model: model pdf
-        :iterable pars:  parameters of the model
+        :callable model:    model pdf
+        :iterable pars:     parameters of the model
+        :np.ndarray bounds: bounds (FIGARO)
     
     Returns:
         :par_model: instance of model class
@@ -41,6 +42,7 @@ class het_mixture:
         :list-of-callables models: models in the mixture
         :iterable pars:            list of model parameters. Must be formatted as [[p1, p2, ...], [q1, q2, ...], ...]. Add empty list for no parameters.
         :np.ndarray:               weights
+        :np.ndarray bounds:        bounds (FIGARO)
         
     Returns:
         :het_mixture: instance of het_mixture class
