@@ -87,7 +87,7 @@ class HMM:
                        
         if pars is None:
             pars = [[] for _ in models]
-            self.n_draws = 0.
+            self.n_draws = 0
         if par_bounds is not None:
             self.par_bounds = np.atleast_3d(par_bounds).reshape(len(models), -1, 2)
             self.n_draws = int(n_draws)
@@ -142,7 +142,7 @@ class HMM:
         if id == 0:
             self.DPGMM.add_new_point(x)
         # Parameter estimation
-        else:
+        elif self.par_bounds is not None:
             self.log_total_p[id-1] += vals[id]
         
     def _log_predictive_likelihood(self, x, i):
@@ -194,16 +194,19 @@ class HMM:
         return np.array([wi*mi.pdf(x) for wi, mi in zip(self.weights, self.models)]).sum(axis = 0)
     
     def build_mixture(self):
-        if self.par_draws is not None:
+        if self.par_bounds is not None:
+            par_vals = []
             for i in range(len(self.par_models)):
                 pars     = self.par_draws[i].T
                 vals     = np.exp(self.log_total_p[i] - logsumexp(self.log_total_p[i]))
-                par_vals = np.array([np.sum(p*vals) for p in pars])
-                self.par_models[i].pars = par_vals
-
-        if self.DPGMM.n_pts == 0:
-            models = [par_model(uniform, [1./self.volume], self.bounds)] + self.par_models
+                par_vals.append(np.atleast_1d([np.sum(p*vals) for p in pars]))
+            par_models = [par_model(m.model, par, self.bounds) for m, par in zip(self.par_models, par_vals)]
         else:
-            models = [self.DPGMM.build_mixture()] + self.par_models
+            par_models = self.par_models
+        
+        if self.DPGMM.n_pts == 0:
+            models = [par_model(uniform, [1./self.volume], self.bounds)] + par_models
+        else:
+            models = [self.DPGMM.build_mixture()] + par_models
         return het_mixture(models, self.weights, self.bounds)
         
