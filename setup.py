@@ -25,15 +25,15 @@ class build_ext(_build_ext):
         self.include_dirs.append(numpy.get_include())
 
 setup(
-    name = 'heteromix',
+    name = 'muffin',
     description = 'Heterogeneous mixture model',
     author = 'Stefano Rinaldi',
     author_email = 'stefano.rinaldi@phd.unipi.it',
-    url = 'https://github.com/sterinaldi/heteromix',
+    url = 'https://github.com/sterinaldi/muffin',
     python_requires = '>=3.7',
-    packages = ['heteromix'],
+    packages = ['muffin'],
     install_requires=requirements,
-    include_dirs = ['heteromix', numpy.get_include()],
+    include_dirs = ['muffin', numpy.get_include()],
     setup_requires=['numpy', 'cython'],
     package_data={"": ['*.c', '*.pyx', '*.pxd']},
     )
