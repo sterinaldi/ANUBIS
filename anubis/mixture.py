@@ -211,7 +211,7 @@ class HMM:
                 pars     = self.par_draws[i].T
                 vals     = np.exp(self.log_total_p[i] - logsumexp(self.log_total_p[i]))
                 par_vals.append(np.atleast_1d([np.sum(p*vals) for p in pars]))
-            par_models = [par_model(m.model, par, self.bounds) for m, par in zip(self.par_models, par_vals)]
+            par_models = [par_model(m.model, par, self.bounds, self.probit) for m, par in zip(self.par_models, par_vals)]
         else:
             par_models = self.par_models
         
