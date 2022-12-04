@@ -52,6 +52,7 @@ class het_mixture:
         self.weights = weights
         self.bounds  = np.atleast_2d(bounds)
         self.dim     = len(self.bounds)
+        self.probit  = models[0].probit
     
     def __call__(self, x):
         return self.pdf(x)
@@ -87,6 +88,7 @@ class HMM:
                        n_draws = 1e3,
                        alpha0 = 1.,
                        gamma0 = None,
+                       probit = False,
                        ):
                        
         if pars is None:
@@ -102,8 +104,11 @@ class HMM:
         if self.par_bounds is not None:
             self.par_draws   = np.atleast_2d([np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) for b in self.par_bounds])
             self.log_total_p = [np.zeros(self.n_draws) for _ in range(len(self.par_models))]
-        self.DPGMM  = DPGMM(bounds = bounds, prior_pars = prior_pars, alpha0 = alpha0)
+
         self.bounds       = np.atleast_2d(bounds)
+        self.dim          = len(self.bounds)
+        self.probit       = probit
+        self.DPGMM        = DPGMM(bounds = bounds, prior_pars = prior_pars, alpha0 = alpha0, probit = self.probit)
         self.volume       = np.prod(np.diff(self.DPGMM.bounds, axis = 1))
         self.components   = [self.DPGMM] + self.par_models
         self.n_components = len(models) + 1
@@ -180,7 +185,7 @@ class HMM:
             else:
                 scores[i] += np.log(ss.N) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
         scores = [score for score in scores.values()]
-        return logsumexp(scores) - probit_logJ(x, self.bounds)
+        return logsumexp(scores) - probit_logJ(x, self.bounds, self.probit)
     
     def add_new_point(self, x):
         self._assign_to_component(np.atleast_2d(x))
