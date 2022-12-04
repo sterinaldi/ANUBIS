@@ -15,16 +15,18 @@ class par_model:
         :callable model:    model pdf
         :iterable pars:     parameters of the model
         :np.ndarray bounds: bounds (FIGARO)
+        :bool probit:       whether to use the probit transformation or not (FIGARO compatibility)
     
     Returns:
         :par_model: instance of model class
     """
-    def __init__(self, model, pars, bounds):
+    def __init__(self, model, pars, bounds, probit):
         self.model  = model
         self.pars   = pars
         self.bounds = np.atleast_2d(bounds)
         self.dim    = len(self.bounds)
-    
+        self.probit = probit
+        
     def __call__(self, x):
         return self.pdf(x)
 
@@ -100,7 +102,7 @@ class HMM:
         else:
             self.par_bounds = None
                 
-        self.par_models = [par_model(mod, p, bounds) for mod, p in zip(models, pars)]
+        self.par_models = [par_model(mod, p, bounds, probit) for mod, p in zip(models, pars)]
         if self.par_bounds is not None:
             self.par_draws   = np.atleast_2d([np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) for b in self.par_bounds])
             self.log_total_p = [np.zeros(self.n_draws) for _ in range(len(self.par_models))]
@@ -214,7 +216,7 @@ class HMM:
             par_models = self.par_models
         
         if self.DPGMM.n_pts == 0:
-            models = [par_model(uniform, [1./self.volume], self.bounds)] + par_models
+            models = [par_model(uniform, [1./self.volume], self.bounds, self.probit)] + par_models
         else:
             models = [self.DPGMM.build_mixture()] + par_models
         return het_mixture(models, self.weights, self.bounds)
