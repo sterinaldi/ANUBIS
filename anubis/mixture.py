@@ -121,11 +121,11 @@ class HMM:
             # Symmetric prior
             self.gamma0  = np.ones(self.n_components)
         else:
-            gamma0 = np.array([gamma0])
+            gamma0 = np.array(gamma0)
             if len(gamma0) == self.n_components:
                 self.gamma0 = gamma0
             else:
-                raise Exception("gamma0 must be an array with {n} components.".format(self.n_components))
+                raise Exception("gamma0 must be an array with {0} components.".format(self.n_components))
         self.weights = self.gamma0/np.sum(self.gamma0)
     
     def __call__(self, x):
@@ -144,7 +144,8 @@ class HMM:
         for i in range(self.n_components):
             score, vals[i] = self._log_predictive_likelihood(x, i)
             scores[i]  = score
-            scores[i] += np.log(self.gamma0[i] + self.n_pts[i])
+            with np.errstate(divide='ignore'): # If a gamma is 0 (ideally the DPGMM) ignores it
+                scores[i] += np.log(self.gamma0[i] + self.n_pts[i])
         scores = np.exp(scores - logsumexp(scores))
         id = np.random.choice(self.n_components, p = scores)
         self.n_pts[id] += 1
@@ -210,7 +211,7 @@ class HMM:
             for i in range(len(self.par_models)):
                 pars     = self.par_draws[i].T
                 vals     = np.exp(self.log_total_p[i] - logsumexp(self.log_total_p[i]))
-                par_vals.append(np.atleast_1d([np.sum(p*vals) for p in pars]))
+                par_vals.append(np.atleast_1d([np.random.choice(p, p = vals) for p in pars]))
             par_models = [par_model(m.model, par, self.bounds, self.probit) for m, par in zip(self.par_models, par_vals)]
         else:
             par_models = self.par_models
