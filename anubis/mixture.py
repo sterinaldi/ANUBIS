@@ -4,6 +4,8 @@ from figaro.decorators import probit
 from figaro.transform import probit_logJ
 from scipy.special import logsumexp
 
+np.seterr(divide = 'ignore')
+
 def uniform(x, v):
     return np.ones(np.shape(x))*v
 
@@ -105,8 +107,8 @@ class HMM:
         self.par_models = [par_model(mod, p, bounds, probit) for mod, p in zip(models, pars)]
         if self.par_bounds is not None:
             self.par_draws   = np.atleast_2d([np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) for b in self.par_bounds])
-            self.log_total_p = [np.zeros(self.n_draws) for _ in range(len(self.par_models))]
-
+            self.log_total_p = np.array([np.zeros(self.n_draws) for _ in range(len(self.par_models))])
+            
         self.bounds       = np.atleast_2d(bounds)
         self.dim          = len(self.bounds)
         self.probit       = probit
@@ -135,17 +137,15 @@ class HMM:
         self.n_pts     = np.zeros(self.n_components)
         self.weights   = self.gamma0/np.sum(self.gamma0)
         if self.par_bounds is not None:
-            self.par_draws   = np.array([np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) for b in self.par_bounds])
-            self.log_total_p = [np.zeros(self.n_draws) for _ in range(len(self.par_models))]
+            self.par_draws   = np.atleast_2d([np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) for b in self.par_bounds])
+            self.log_total_p = np.array([np.zeros(self.n_draws) for _ in range(len(self.par_models))])
     
     def _assign_to_component(self, x):
         scores = np.zeros(self.n_components)
         vals = np.zeros(shape = (self.n_components, self.n_draws))
         for i in range(self.n_components):
             score, vals[i] = self._log_predictive_likelihood(x, i)
-            scores[i]  = score
-            with np.errstate(divide='ignore'): # If a gamma is 0 (ideally the DPGMM) ignores it
-                scores[i] += np.log(self.gamma0[i] + self.n_pts[i])
+            scores[i] = score + np.log(self.gamma0[i] + self.n_pts[i])
         scores = np.exp(scores - logsumexp(scores))
         id = np.random.choice(self.n_components, p = scores)
         self.n_pts[id] += 1
@@ -162,32 +162,26 @@ class HMM:
             return self._log_predictive_mixture(x), np.zeros(self.n_draws)
         else:
             if self.par_bounds is None:
-                p = self.components[i].pdf(x)
-                if p == 0.:
-                    return -np.inf, np.zeros(self.n_draws)
-                return np.log(p), np.zeros(self.n_draws)
+                return np.log(self.components[i].pdf(x)), np.zeros(self.n_draws)
             else:
-                p = np.array([self.components[i].pdf_pars(x, pars) for pars in self.par_draws[i-1]]).flatten()
-                log_p = np.ones(len(p))*-np.inf
-                log_p[p>0] = np.log(p[p>0])
-                v = logsumexp(log_p + self.log_total_p[i-1]) - logsumexp(self.log_total_p[i-1])
+                log_p = np.log([self.components[i].pdf_pars(x, pars) for pars in self.par_draws[i-1]]).flatten()
+                v     = logsumexp(log_p + self.log_total_p[i-1]) - logsumexp(self.log_total_p[i-1])
                 return v, log_p
 
     
     @probit
     def _log_predictive_mixture(self, x):
-        scores = {}
-        for i in list(np.arange(self.DPGMM.n_cl)) + ["new"]:
+        scores = np.zeros(self.DPGMM.n_cl + 1)
+        for j, i in enumerate(list(np.arange(self.DPGMM.n_cl)) + ["new"]):
             if i == "new":
                 ss = "new"
             else:
                 ss = self.DPGMM.mixture[i]
-            scores[i] = self.DPGMM._log_predictive_likelihood(x, ss)
+            scores[j] = self.DPGMM._log_predictive_likelihood(x, ss)
             if ss == "new":
-                scores[i] += np.log(self.DPGMM.alpha) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
+                scores[j] += np.log(self.DPGMM.alpha) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
             else:
-                scores[i] += np.log(ss.N) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
-        scores = [score for score in scores.values()]
+                scores[j] += np.log(ss.N) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
         return logsumexp(scores) - probit_logJ(x, self.bounds, self.probit)
     
     def add_new_point(self, x):
