@@ -1,7 +1,9 @@
 import numpy as np
-from figaro.mixture import DPGMM
+
+from figaro.mixture import DPGMM, HDPGMM
 from figaro.decorators import probit
 from figaro.transform import probit_logJ
+from figaro.likelihood import evaluate_mixture_MC_draws, evaluate_mixture_MC_draws_1d
 from scipy.special import logsumexp
 
 np.seterr(divide = 'ignore')
@@ -152,11 +154,14 @@ class HMM:
         self.weights = (self.n_pts + self.gamma0)/np.sum(self.n_pts + self.gamma0)
         # If DPGMM, updates mixture
         if id == 0:
-            self.DPGMM.add_new_point(x)
+            self._add_point_to_mixture(x)
         # Parameter estimation
         elif self.par_bounds is not None:
             self.log_total_p[id-1] += vals[id]
-        
+    
+    def _add_point_to_mixture(self, x):
+        self.DPGMM.add_new_point(x)
+    
     def _log_predictive_likelihood(self, x, i):
         if i == 0:
             return self._log_predictive_mixture(x), np.zeros(self.n_draws)
@@ -167,7 +172,6 @@ class HMM:
                 log_p = np.log([self.components[i].pdf_pars(x, pars) for pars in self.par_draws[i-1]]).flatten()
                 v     = logsumexp(log_p + self.log_total_p[i-1]) - logsumexp(self.log_total_p[i-1])
                 return v, log_p
-
     
     @probit
     def _log_predictive_mixture(self, x):
@@ -216,3 +220,86 @@ class HMM:
             models = [self.DPGMM.build_mixture()] + par_models
         return het_mixture(models, self.weights, self.bounds)
         
+class HierHMM:
+    """
+    Class to infer a distribution given a set of events.
+    Child of HMM class.
+    
+    Arguments:
+        :list-of-callbles:    models
+        :iterable bounds:     boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
+        :iterable prior_pars: NIW prior parameters (k, L, nu, mu)
+        :iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
+        :double n_draws_pars: number of draws for MC integral over parameters
+        :double n_draws_evs:  number of draws for MC integral over events
+        :double alpha0:       initial guess for concentration parameter
+        :np.array gamma0:     Dirichlet Distribution prior
+    
+    Returns:
+        :HierHMM: instance of HierHMM class
+    """
+    def __init__(self, models,
+                       bounds,
+                       pars = None,
+                       par_bounds = None,
+                       prior_pars = None,
+                       n_draws_pars = 1e3,
+                       n_draws_evs = 1e3,
+                       alpha0 = 1.,
+                       gamma0 = None,
+                       probit = False,
+                       ):
+        
+        super().__init__(models = models,
+                         bounds = bounds,
+                         pars = pars,
+                         par_bounds = par_bounds,
+                         prior_pars = prior_pars,
+                         n_draws = n_draws_pars,
+                         alpha0 = alpha0,
+                         gamma0 = gamma0,
+                         probit = probit,
+                         )
+        
+        self.DPGMM      = HDPGMM(bounds = bounds, prior_pars = prior_pars, alpha0 = alpha0, probit = self.probit)
+        self.components = [self.DPGMM] + self.par_models
+
+    def _add_point_to_mixture(self, x):
+        self.DPGMM.add_new_point([x])
+        
+    def _log_predictive_likelihood(self, x, i):
+        if i == 0:
+            return self._log_predictive_mixture(x), np.zeros(self.n_draws)
+        else:
+            samps = x.rvs(self.n_draws_evs)
+            if self.par_bounds is None:
+                return np.log(np.mean(self.components[i].pdf(samps))), np.zeros(self.n_draws)
+            else:
+                log_p = np.log([np.mean(self.components[i].pdf_pars(samps, pars)) for pars in self.par_draws[i-1]]).flatten()
+                v     = logsumexp(log_p + self.log_total_p[i-1]) - logsumexp(self.log_total_p[i-1])
+                return v, log_p
+
+    @probit
+    def _log_predictive_mixture(self, x):
+        scores = np.zeros(self.DPGMM.n_cl + 1)
+        if self.dim == 1:
+            logL_x = evaluate_mixture_MC_draws_1d(self.DPGMM.mu_MC, self.DPGMM.sigma_MC, x.means, x.covs, x.w)
+        else:
+            logL_x = evaluate_mixture_MC_draws(self.DPGMM.mu_MC, self.DPGMM.sigma_MC, x.means, x.covs, x.w)
+        for j, i in list(np.arange(self.DPGMM.n_cl)) + ["new"]:
+            if i == "new":
+                ss     = "new"
+                logL_D = np.zeros(self.DPGMM.MC_draws)
+            else:
+                ss     = self.DPGMM.mixture[i]
+                logL_D = ss.logL_D
+            scores[j] = logsumexp(logL_D + logL_x) - logsumexp(logL_D)
+            if ss == "new":
+                scores[j] += np.log(self.DPGMM.alpha) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
+            else:
+                scores[j] += np.log(ss.N) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
+        return logsumexp(scores)
+    
+    def add_new_point(self, ev):
+        x = np.random.choice(ev)
+        self._assign_to_component(x)
