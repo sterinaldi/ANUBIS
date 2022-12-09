@@ -1,10 +1,10 @@
 import numpy as np
+from scipy.special import logsumexp
 
 from figaro.mixture import DPGMM, HDPGMM
 from figaro.decorators import probit
 from figaro.transform import probit_logJ
 from figaro.likelihood import evaluate_mixture_MC_draws, evaluate_mixture_MC_draws_1d
-from scipy.special import logsumexp
 
 np.seterr(divide = 'ignore')
 
@@ -217,7 +217,8 @@ class HMM:
         if self.DPGMM.n_pts == 0:
             models = [par_model(uniform, [1./self.volume], self.bounds, self.probit)] + par_models
         else:
-            models = [self.DPGMM.build_mixture()] + par_models
+            nonpar = self.DPGMM.build_mixture()
+            models = [nonpar] + par_models
         return het_mixture(models, self.weights, self.bounds)
         
 class HierHMM:
