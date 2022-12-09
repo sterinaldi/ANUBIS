@@ -17,6 +17,15 @@ def save_density(draws, folder = '.', name = 'density'):
         dill.dump(draws, f)
         
 def load_density(path):
+    """
+    Loads a list of anubis.het_mixture instances from path.
+
+    Arguments:
+        :str or Path path: path with draws (file or folder)
+
+    Returns
+        :list: anubis.het_mixture object instances
+    """
     path = Path(path)
     if path.is_file():
         return _load_density_file(path)
