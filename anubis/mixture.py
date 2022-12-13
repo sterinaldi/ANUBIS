@@ -88,13 +88,13 @@ class HMM:
     """
     def __init__(self, models,
                        bounds,
-                       pars = None,
+                       pars       = None,
                        par_bounds = None,
                        prior_pars = None,
-                       n_draws = 1e3,
-                       alpha0 = 1.,
-                       gamma0 = None,
-                       probit = False,
+                       n_draws    = 1e3,
+                       alpha0     = 1.,
+                       gamma0     = None,
+                       probit     = False,
                        ):
                        
         if pars is None:
@@ -114,11 +114,16 @@ class HMM:
         self.bounds       = np.atleast_2d(bounds)
         self.dim          = len(self.bounds)
         self.probit       = probit
-        self.DPGMM        = DPGMM(bounds = bounds, prior_pars = prior_pars, alpha0 = alpha0, probit = self.probit)
+
+        self.DPGMM        = DPGMM(bounds = bounds,
+                                  prior_pars = prior_pars,
+                                  alpha0 = alpha0,
+                                  probit = self.probit,
+                                  )
+
         self.volume       = np.prod(np.diff(self.DPGMM.bounds, axis = 1))
         self.components   = [self.DPGMM] + self.par_models
         self.n_components = len(models) + 1
-        
         self.n_pts = np.zeros(self.n_components)
          
         if gamma0 is None:
@@ -221,7 +226,7 @@ class HMM:
             models = [nonpar] + par_models
         return het_mixture(models, self.weights, self.bounds)
         
-class HierHMM:
+class HierHMM(HMM):
     """
     Class to infer a distribution given a set of events.
     Child of HMM class.
@@ -241,29 +246,34 @@ class HierHMM:
     """
     def __init__(self, models,
                        bounds,
-                       pars = None,
-                       par_bounds = None,
-                       prior_pars = None,
+                       pars         = None,
+                       par_bounds   = None,
+                       prior_pars   = None,
                        n_draws_pars = 1e3,
-                       n_draws_evs = 1e3,
-                       alpha0 = 1.,
-                       gamma0 = None,
-                       probit = False,
+                       n_draws_evs  = 1e3,
+                       alpha0       = 1.,
+                       gamma0       = None,
+                       probit       = False,
                        ):
         
-        super().__init__(models = models,
-                         bounds = bounds,
-                         pars = pars,
+        super().__init__(models     = models,
+                         bounds     = bounds,
+                         pars       = pars,
                          par_bounds = par_bounds,
                          prior_pars = prior_pars,
-                         n_draws = n_draws_pars,
-                         alpha0 = alpha0,
-                         gamma0 = gamma0,
-                         probit = probit,
+                         n_draws    = n_draws_pars,
+                         alpha0     = alpha0,
+                         gamma0     = gamma0,
+                         probit     = probit,
                          )
         
-        self.DPGMM      = HDPGMM(bounds = bounds, prior_pars = prior_pars, alpha0 = alpha0, probit = self.probit)
-        self.components = [self.DPGMM] + self.par_models
+        self.DPGMM       = HDPGMM(bounds     = bounds,
+                                  prior_pars = prior_pars,
+                                  alpha0     = alpha0,
+                                  probit     = self.probit)
+
+        self.components  = [self.DPGMM] + self.par_models
+        self.n_draws_evs = int(n_draws_evs)
 
     def _add_point_to_mixture(self, x):
         self.DPGMM.add_new_point([x])
@@ -287,7 +297,7 @@ class HierHMM:
             logL_x = evaluate_mixture_MC_draws_1d(self.DPGMM.mu_MC, self.DPGMM.sigma_MC, x.means, x.covs, x.w)
         else:
             logL_x = evaluate_mixture_MC_draws(self.DPGMM.mu_MC, self.DPGMM.sigma_MC, x.means, x.covs, x.w)
-        for j, i in list(np.arange(self.DPGMM.n_cl)) + ["new"]:
+        for j, i in enumerate(list(np.arange(self.DPGMM.n_cl)) + ["new"]):
             if i == "new":
                 ss     = "new"
                 logL_D = np.zeros(self.DPGMM.MC_draws)
