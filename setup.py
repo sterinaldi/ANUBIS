@@ -36,5 +36,5 @@ setup(
     include_dirs = ['anubis', numpy.get_include()],
     setup_requires=['numpy', 'cython'],
     package_data={"": ['*.c', '*.pyx', '*.pxd']},
-    version='0.1.0'
+    version='0.2.0'
     )
