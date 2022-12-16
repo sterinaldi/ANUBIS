@@ -36,5 +36,7 @@ setup(
     include_dirs = ['anubis', numpy.get_include()],
     setup_requires=['numpy', 'cython'],
     package_data={"": ['*.c', '*.pyx', '*.pxd']},
-    version='0.2.0'
+    version='0.2.0',
+    long_description=("README.md").read_text(),
+    long_description_content_type='text/markdown',
     )
