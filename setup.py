@@ -15,6 +15,8 @@ except ImportError:
 
 with open("requirements.txt") as requires_file:
     requirements = requires_file.read().split("\n")
+with open("README.md") as readme_file:
+    long_description = readme_file.read()
 
 # see https://stackoverflow.com/a/21621689/1862861 for why this is here
 class build_ext(_build_ext):
@@ -37,6 +39,6 @@ setup(
     setup_requires=['numpy', 'cython'],
     package_data={"": ['*.c', '*.pyx', '*.pxd']},
     version='0.2.1',
-    long_description=("README.md").read_text(),
+    long_description=long_description,
     long_description_content_type='text/markdown',
     )
