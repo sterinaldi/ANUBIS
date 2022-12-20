@@ -95,6 +95,7 @@ class HMM:
                        alpha0     = 1.,
                        gamma0     = None,
                        probit     = False,
+                       augment    = True,
                        ):
                        
         if pars is None:
@@ -114,16 +115,21 @@ class HMM:
         self.bounds       = np.atleast_2d(bounds)
         self.dim          = len(self.bounds)
         self.probit       = probit
+        self.augment      = augment
+        
+        if self.augment:
+            self.DPGMM        = DPGMM(bounds = bounds,
+                                      prior_pars = prior_pars,
+                                      alpha0 = alpha0,
+                                      probit = self.probit,
+                                      )
+            self.volume       = np.prod(np.diff(self.DPGMM.bounds, axis = 1))
+            self.components   = [self.DPGMM] + self.par_models
+            self.n_components = len(models) + 1
+        else:
+            self.n_components = self.par_models
+            self.n_components = len(models)
 
-        self.DPGMM        = DPGMM(bounds = bounds,
-                                  prior_pars = prior_pars,
-                                  alpha0 = alpha0,
-                                  probit = self.probit,
-                                  )
-
-        self.volume       = np.prod(np.diff(self.DPGMM.bounds, axis = 1))
-        self.components   = [self.DPGMM] + self.par_models
-        self.n_components = len(models) + 1
         self.n_pts = np.zeros(self.n_components)
          
         if gamma0 is None:
@@ -146,7 +152,9 @@ class HMM:
         if self.par_bounds is not None:
             self.par_draws   = np.atleast_2d([np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) for b in self.par_bounds])
             self.log_total_p = np.array([np.zeros(self.n_draws) for _ in range(len(self.par_models))])
-    
+        if self.augment:
+            self.DPGMM.initialise()
+
     def _assign_to_component(self, x):
         scores = np.zeros(self.n_components)
         vals = np.zeros(shape = (self.n_components, self.n_draws))
@@ -158,24 +166,32 @@ class HMM:
         self.n_pts[id] += 1
         self.weights = (self.n_pts + self.gamma0)/np.sum(self.n_pts + self.gamma0)
         # If DPGMM, updates mixture
-        if id == 0:
+        if self.augment and id == 0:
             self._add_point_to_mixture(x)
         # Parameter estimation
         elif self.par_bounds is not None:
-            self.log_total_p[id-1] += vals[id]
-    
+            if self.augment:
+                id_p = id - 1
+            else:
+                id_p = id
+            self.log_total_p[id_p] += vals[id]
+
     def _add_point_to_mixture(self, x):
         self.DPGMM.add_new_point(x)
     
     def _log_predictive_likelihood(self, x, i):
-        if i == 0:
+        if self.augment and i == 0:
             return self._log_predictive_mixture(x), np.zeros(self.n_draws)
         else:
             if self.par_bounds is None:
                 return np.log(self.components[i].pdf(x)), np.zeros(self.n_draws)
             else:
-                log_p = np.log([self.components[i].pdf_pars(x, pars) for pars in self.par_draws[i-1]]).flatten()
-                v     = logsumexp(log_p + self.log_total_p[i-1]) - logsumexp(self.log_total_p[i-1])
+                if self.augment:
+                    i_p = i-1
+                else:
+                    i_p = i
+                log_p = np.log([self.components[i].pdf_pars(x, pars) for pars in self.par_draws[i_p]]).flatten()
+                v     = logsumexp(log_p + self.log_total_p[i_p]) - logsumexp(self.log_total_p[i_p])
                 return v, log_p
     
     @probit
@@ -219,11 +235,14 @@ class HMM:
         else:
             par_models = self.par_models
         
-        if self.DPGMM.n_pts == 0:
-            models = [par_model(uniform, [1./self.volume], self.bounds, self.probit)] + par_models
+        if self.augment:
+            if self.DPGMM.n_pts == 0:
+                models = [par_model(uniform, [1./self.volume], self.bounds, self.probit)] + par_models
+            else:
+                nonpar = self.DPGMM.build_mixture()
+                models = [nonpar] + par_models
         else:
-            nonpar = self.DPGMM.build_mixture()
-            models = [nonpar] + par_models
+            models = par_models
         return het_mixture(models, self.weights, self.bounds)
         
 class HierHMM(HMM):
@@ -254,6 +273,7 @@ class HierHMM(HMM):
                        alpha0       = 1.,
                        gamma0       = None,
                        probit       = False,
+                       augment      = True,
                        ):
         
         super().__init__(models     = models,
@@ -265,29 +285,35 @@ class HierHMM(HMM):
                          alpha0     = alpha0,
                          gamma0     = gamma0,
                          probit     = probit,
+                         augment    = augment,
                          )
         
-        self.DPGMM       = HDPGMM(bounds     = bounds,
-                                  prior_pars = prior_pars,
-                                  alpha0     = alpha0,
-                                  probit     = self.probit)
+        if self.augment:
+            self.DPGMM       = HDPGMM(bounds     = bounds,
+                                      prior_pars = prior_pars,
+                                      alpha0     = alpha0,
+                                      probit     = self.probit)
+            self.components  = [self.DPGMM] + self.par_models
 
-        self.components  = [self.DPGMM] + self.par_models
         self.n_draws_evs = int(n_draws_evs)
 
     def _add_point_to_mixture(self, x):
         self.DPGMM.add_new_point([x])
         
     def _log_predictive_likelihood(self, x, i):
-        if i == 0:
+        if self.augment and i == 0:
             return self._log_predictive_mixture(x), np.zeros(self.n_draws)
         else:
             samps = x.rvs(self.n_draws_evs)
             if self.par_bounds is None:
                 return np.log(np.mean(self.components[i].pdf(samps))), np.zeros(self.n_draws)
             else:
-                log_p = np.log([np.mean(self.components[i].pdf_pars(samps, pars)) for pars in self.par_draws[i-1]]).flatten()
-                v     = logsumexp(log_p + self.log_total_p[i-1]) - logsumexp(self.log_total_p[i-1])
+                if self.augment:
+                    i_p = i-1
+                else:
+                    i_p = i
+                log_p = np.log([np.mean(self.components[i].pdf_pars(samps, pars)) for pars in self.par_draws[i_p]]).flatten()
+                v     = logsumexp(log_p + self.log_total_p[i_p]) - logsumexp(self.log_total_p[i_p])
                 return v, log_p
 
     @probit
