@@ -4,13 +4,30 @@ import warnings
 from corner import corner
 from pathlib import Path
 
-from figaro.plot import plot_median_cr, plot_multidim, plot_1d_dist
+from figaro.plot import plot_median_cr as figaro_plot_median_cr
+from figaro.plot import plot_1d_dist as figaro_plot_1d_dist
+from figaro.plot import plot_multidim
 
 from anubis.utils import get_samples, get_weights, get_samples_and_weights
 from anubis.exceptions import ANUBISException
 
 plot_keys = ['pars', 'weights', 'joint', 'all']
 
+def _add_label_to_kwargs(d):
+    if not 'median_label' in d.keys():
+        d['median_label'] = '\mathrm{Anubis}'
+    return d
+    
+# Wrappers for FIGARO functions with different default labels
+def plot_median_cr(*args, **kwargs):
+    _add_label_to_kwargs(kwargs)
+    figaro_plot_median_cr(*args, **kwargs)
+    
+def plot_1d_dist(*args, **kwargs):
+    _add_label_to_kwargs(kwargs)
+    figaro_plot_1d_dist(*args, **kwargs)
+
+# ANUBIS plot functions
 def plot_parametric(draws, injected = None, samples = None, selfunc = None, bounds = None, out_folder = '.', name = 'parametric', n_pts = 1000, label = None, unit = None, show = False, save = True, subfolder = False, true_value = None, true_value_label = '\mathrm{True\ value}', injected_label = '\mathrm{Simulated}', median_label = '\mathrm{Parametric}', logx = False, logy = False):
     """
     Plot the parametric distribution along with samples from the true distribution (if available).
@@ -62,24 +79,24 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
     probs = np.array([np.sum([d.weights[i+1]*model(x) for i, model in enumerate(d.models[1:])], axis = 0) for d in draws])
     probs = np.array([p/np.sum(p*dx) for p in probs])
     
-    plot_1d_dist(x                = x,
-                 draws            = probs,
-                 injected         = injected,
-                 samples          = samples,
-                 out_folder       = out_folder,
-                 name             = name,
-                 label            = label,
-                 unit             = unit,
-                 show             = show,
-                 save             = save,
-                 subfolder        = subfolder,
-                 true_value       = true_value,
-                 true_value_label = true_value_label,
-                 injected_label   = injected_label,
-                 median_label     = median_label,
-                 logx             = logx,
-                 logy             = logy,
-                 )
+    figaro_plot_1d_dist(x                = x,
+                        draws            = probs,
+                        injected         = injected,
+                        samples          = samples,
+                        out_folder       = out_folder,
+                        name             = name,
+                        label            = label,
+                        unit             = unit,
+                        show             = show,
+                        save             = save,
+                        subfolder        = subfolder,
+                        true_value       = true_value,
+                        true_value_label = true_value_label,
+                        injected_label   = injected_label,
+                        median_label     = median_label,
+                        logx             = logx,
+                        logy             = logy,
+                        )
 
 def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, bounds = None, out_folder = '.', name = 'DPGMM', n_pts = None, labels = None, units = None, hierarchical = False, show = False, save = True, subfolder = False, true_value = None, true_value_label = '\mathrm{True\ value}', injected_label = '\mathrm{Simulated}', figsize = 7, levels = [0.5, 0.68, 0.9], scatter_points = False):
     """
@@ -113,24 +130,24 @@ def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, 
     if draws[0].dim == 1:
         if n_pts is None:
             n_pts = 1000
-        plot_median_cr(draws            = nonpar,
-                       injected         = injected,
-                       samples          = samples,
-                       selfunc          = selfunc,
-                       bounds           = bounds,
-                       out_folder       = out_folder,
-                       name             = name,
-                       n_pts            = n_pts,
-                       label            = labels,
-                       unit             = units,
-                       hierarchical     = hierarchical,
-                       show             = show,
-                       save             = save,
-                       subfolder        = subfolder,
-                       true_value       = true_value,
-                       true_value_label = true_value_label,
-                       injected_label   = injected_label,
-                       )
+        figaro_plot_median_cr(draws            = nonpar,
+                              injected         = injected,
+                              samples          = samples,
+                              selfunc          = selfunc,
+                              bounds           = bounds,
+                              out_folder       = out_folder,
+                              name             = name,
+                              n_pts            = n_pts,
+                              label            = labels,
+                              unit             = units,
+                              hierarchical     = hierarchical,
+                              show             = show,
+                              save             = save,
+                              subfolder        = subfolder,
+                              true_value       = true_value,
+                              true_value_label = true_value_label,
+                              injected_label   = injected_label,
+                              )
     else:
         if injected is not None:
             warnings.warn("Injected distribution can be plotted only on 1-dimensional distributions.")
