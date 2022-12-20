@@ -15,7 +15,7 @@ plot_keys = ['pars', 'weights', 'joint', 'all']
 
 def _add_label_to_kwargs(d):
     if not 'median_label' in d.keys():
-        d['median_label'] = '\mathrm{Anubis}'
+        d['median_label'] = '\mathrm{HMM}'
     return d
     
 # Wrappers for FIGARO functions with different default labels
