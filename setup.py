@@ -8,11 +8,6 @@ from distutils.extension import Extension
 import os
 import warnings
 
-try:
-    from Cython.Build import cythonize
-except ImportError:
-    raise ImportError("Cython not found. Please install it via\n\tpip install Cython")
-
 with open("requirements.txt") as requires_file:
     requirements = requires_file.read().split("\n")
 with open("README.md") as readme_file:
