@@ -1,11 +1,12 @@
 import numpy as np
 from scipy.special import logsumexp
-
+from collections import deque
 from figaro.mixture import DPGMM, HDPGMM
 from figaro.decorators import probit
 from figaro.transform import probit_logJ
 from figaro.likelihood import evaluate_mixture_MC_draws, evaluate_mixture_MC_draws_1d
 
+import sys
 np.seterr(divide = 'ignore')
 
 def uniform(x, v):
@@ -32,13 +33,13 @@ class par_model:
         self.probit = probit
         
     def __call__(self, x):
-        return self.pdf(x)
+        return self.pdf(x, **kwargs)
 
-    def pdf(self, x):
-        return self.model(x, *self.pars)
+    def pdf(self, x, **kwargs):
+        return self.model(x, *self.pars, **kwargs)
     
-    def pdf_pars(self, x, pars):
-        return self.model(x, *pars)
+    def pdf_pars(self, x, pars, **kwargs):
+        return self.model(x, *pars, **kwargs)
 
 class het_mixture:
     """
@@ -96,6 +97,7 @@ class HMM:
                        gamma0     = None,
                        probit     = False,
                        augment    = True,
+                       noise_example = None,
                        ):
                        
         if pars is None:
@@ -116,6 +118,8 @@ class HMM:
         self.dim          = len(self.bounds)
         self.probit       = probit
         self.augment      = augment
+        self.noise_example= noise_example
+        self.old_chunks   = deque([noise_example], 16)
         
         if self.augment:
             self.DPGMM        = DPGMM(bounds = bounds,
@@ -152,6 +156,7 @@ class HMM:
         if self.par_bounds is not None:
             self.par_draws   = np.atleast_2d([np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) for b in self.par_bounds])
             self.log_total_p = np.array([np.zeros(self.n_draws) for _ in range(len(self.par_models))])
+        self.old_chunks   = deque([self.noise_example], 16)
         if self.augment:
             self.DPGMM.initialise()
 
@@ -159,8 +164,10 @@ class HMM:
         scores = np.zeros(self.n_components)
         vals = np.zeros(shape = (self.n_components, self.n_draws))
         for i in range(self.n_components):
+
             score, vals[i] = self._log_predictive_likelihood(x, i)
             scores[i] = score + np.log(self.gamma0[i] + self.n_pts[i])
+        sys.stderr.write('scores = {}\r'.format(scores))
         scores = np.exp(scores - logsumexp(scores))
         id = np.random.choice(self.n_components, p = scores)
         self.n_pts[id] += 1
@@ -168,6 +175,8 @@ class HMM:
         # If DPGMM, updates mixture
         if self.augment and id == 0:
             self._add_point_to_mixture(x)
+        if id == 1:
+            self.old_chunks.append(x[0])
         # Parameter estimation
         elif self.par_bounds is not None:
             if self.augment:
@@ -181,7 +190,8 @@ class HMM:
     
     def _log_predictive_likelihood(self, x, i):
         if self.augment and i == 0:
-            return self._log_predictive_mixture(x), np.zeros(self.n_draws)
+            temp = self._log_predictive_mixture(x)
+            return temp, np.zeros(self.n_draws)
         else:
             if self.par_bounds is None:
                 return np.log(self.components[i].pdf(x)), np.zeros(self.n_draws)
@@ -190,8 +200,9 @@ class HMM:
                     i_p = i-1
                 else:
                     i_p = i
-                log_p = np.log([self.components[i].pdf_pars(x, pars) for pars in self.par_draws[i_p]]).flatten()
-                v     = logsumexp(log_p + self.log_total_p[i_p]) - logsumexp(self.log_total_p[i_p])
+                log_p = np.array([self.components[i].pdf_pars(x, pars) for pars in self.par_draws[i_p]]).flatten()
+                v     = logsumexp(log_p) - np.log(len(log_p))
+#                v = logsumexp(log_p + self.log_total_p[i_p]) - logsumexp(self.log_total_p[i_p])
                 return v, log_p
     
     @probit
