@@ -74,7 +74,7 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
         else:
             x_max = bounds[1]
 
-    x    = np.linspace(x_min, x_max, n_pts+2)[1:-1]
+    x    = np.linspace(x_min, x_max, n_pts)
     dx   = x[1]-x[0]
     probs = np.array([np.sum([d.weights[i+1]*model(x) for i, model in enumerate(d.models[1:])], axis = 0) for d in draws])
     probs = np.array([p/np.sum(p*dx) for p in probs])
