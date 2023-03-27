@@ -26,8 +26,10 @@ def load_density(path):
     Returns
         :list: anubis.het_mixture object instances
     """
-    path = Path(path)
+    path = Path(path).resolve()
     if path.is_file():
+        if not path.parts[-1].split('.')[-1] == 'pkl':
+            path = Path(path, '.pkl')
         return _load_density_file(path)
     else:
         return [_load_density_file(file) for file in path.glob('*.[jp][sk][ol]*')]
