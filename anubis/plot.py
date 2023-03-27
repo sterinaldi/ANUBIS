@@ -211,7 +211,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
         else:
             parameters_labels = ['${0}$'.format(l) for l in pars_labels]
 
-        c = corner(samples, labels = parameters_labels, truths = true_pars, quantiles = [0.16, 0.5, 0.84], show_titles = True)
+        c = corner(samples, labels = parameters_labels, truths = true_pars, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
         c.savefig(Path(out_folder, plot_name), bbox_inches = 'tight')
 
     if plot in ['weights', 'all']:
@@ -226,7 +226,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
         else:
             weights_labels = ['$w_{np}$'] + ['$w_{'+'{0}'.format(l)+'}$' for l in par_models_labels]
 
-        c = corner(samples, labels = weights_labels, truths = true_weights, quantiles = [0.16, 0.5, 0.84], show_titles = True)
+        c = corner(samples, labels = weights_labels, truths = true_weights, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
         c.savefig(Path(out_folder, plot_name), bbox_inches = 'tight')
 
     if plot in ['joint', 'all']:
@@ -254,5 +254,5 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
             true_weights = [None for _ in range(len(weights_labels))]
         true_vals = true_pars + true_weights
         
-        c = corner(samples, labels = joint_labels, truths = true_vals, quantiles = [0.16, 0.5, 0.84], show_titles = True)
+        c = corner(samples, labels = joint_labels, truths = true_vals, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
         c.savefig(Path(out_folder, plot_name), bbox_inches = 'tight')
