@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.special import logsumexp
+from scipy.stats import dirichlet
 
 from figaro.mixture import DPGMM, HDPGMM
 from figaro.decorators import probit
@@ -38,6 +39,9 @@ class par_model:
         return self.model(x, *self.pars)
     
     def pdf_pars(self, x, pars):
+        return np.apply_along_axis(self._model, 1, pars, x)
+    
+    def _model(self, pars, x):
         return self.model(x, *pars)
 
 class het_mixture:
@@ -190,7 +194,7 @@ class HMM:
                     i_p = i-1
                 else:
                     i_p = i
-                log_p = np.log([self.components[i].pdf_pars(x, pars) for pars in self.par_draws[i_p]]).flatten()
+                log_p = np.log(self.components[i].pdf_pars(x, self.par_draws[i_p])).flatten()
                 v     = logsumexp(log_p + self.log_total_p[i_p]) - logsumexp(self.log_total_p[i_p])
                 return v, log_p
     
@@ -199,15 +203,15 @@ class HMM:
         scores = np.zeros(self.DPGMM.n_cl + 1)
         for j, i in enumerate(list(np.arange(self.DPGMM.n_cl)) + ["new"]):
             if i == "new":
-                ss = "new"
+                ss = None
             else:
                 ss = self.DPGMM.mixture[i]
             scores[j] = self.DPGMM._log_predictive_likelihood(x, ss)
-            if ss == "new":
+            if ss is None:
                 scores[j] += np.log(self.DPGMM.alpha) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
             else:
                 scores[j] += np.log(ss.N) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
-        return logsumexp(scores) - probit_logJ(x, self.bounds, self.probit)
+        return logsumexp(scores) #- probit_logJ(x, self.bounds, self.probit)
     
     def add_new_point(self, x):
         self._assign_to_component(np.atleast_2d(x))
@@ -217,7 +221,6 @@ class HMM:
         for s in samples:
             self.add_new_point(s)
         d = self.build_mixture()
-        self.DPGMM.initialise()
         self.initialise()
         return d
     
@@ -243,7 +246,8 @@ class HMM:
                 models = [nonpar] + par_models
         else:
             models = par_models
-        return het_mixture(models, self.weights, self.bounds)
+#        return het_mixture(models, self.weights, self.bounds)
+        return het_mixture(models, dirichlet(self.n_pts+self.gamma0).rvs()[0], self.bounds)
         
 class HierHMM(HMM):
     """
@@ -325,13 +329,13 @@ class HierHMM(HMM):
             logL_x = evaluate_mixture_MC_draws(self.DPGMM.mu_MC, self.DPGMM.sigma_MC, x.means, x.covs, x.w)
         for j, i in enumerate(list(np.arange(self.DPGMM.n_cl)) + ["new"]):
             if i == "new":
-                ss     = "new"
+                ss     = None
                 logL_D = np.zeros(self.DPGMM.MC_draws)
             else:
                 ss     = self.DPGMM.mixture[i]
                 logL_D = ss.logL_D
             scores[j] = logsumexp(logL_D + logL_x) - logsumexp(logL_D)
-            if ss == "new":
+            if ss is None:
                 scores[j] += np.log(self.DPGMM.alpha) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
             else:
                 scores[j] += np.log(ss.N) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
