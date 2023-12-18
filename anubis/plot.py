@@ -213,6 +213,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
 
         c = corner(samples, labels = parameters_labels, truths = true_pars, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
         c.savefig(Path(out_folder, plot_name), bbox_inches = 'tight')
+        plt.close(c)
 
     if plot in ['weights', 'all']:
         samples = get_weights(draws)
@@ -228,6 +229,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
 
         c = corner(samples, labels = weights_labels, truths = true_weights, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
         c.savefig(Path(out_folder, plot_name), bbox_inches = 'tight')
+        plt.close(c)
 
     if plot in ['joint', 'all']:
         samples  = get_samples_and_weights(draws)
@@ -256,3 +258,4 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
         
         c = corner(samples, labels = joint_labels, truths = true_vals, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
         c.savefig(Path(out_folder, plot_name), bbox_inches = 'tight')
+        plt.close(c)
