@@ -195,7 +195,8 @@ class HMM:
                 else:
                     i_p = i
                 log_p = np.log(self.components[i].pdf_pars(x, self.par_draws[i_p])).flatten()
-                v     = logsumexp(log_p + self.log_total_p[i_p]) - logsumexp(self.log_total_p[i_p])
+                denom = logsumexp(self.log_total_p[i_p]) - np.log(self.n_draws)
+                v     = logsumexp(log_p + self.log_total_p[i_p] - denom) - np.log(self.n_draws)
                 return v, log_p
     
     @probit
@@ -211,7 +212,7 @@ class HMM:
                 scores[j] += np.log(self.DPGMM.alpha) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
             else:
                 scores[j] += np.log(ss.N) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
-        return logsumexp(scores) #- probit_logJ(x, self.bounds, self.probit)
+        return logsumexp(scores)
     
     def add_new_point(self, x):
         self._assign_to_component(np.atleast_2d(x))
@@ -246,7 +247,6 @@ class HMM:
                 models = [nonpar] + par_models
         else:
             models = par_models
-#        return het_mixture(models, self.weights, self.bounds)
         return het_mixture(models, dirichlet(self.n_pts+self.gamma0).rvs()[0], self.bounds)
         
 class HierHMM(HMM):
