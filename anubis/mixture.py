@@ -196,8 +196,8 @@ class HMM:
                     i_p = i
                 log_p = np.log(self.components[i].pdf_pars(x, self.par_draws[i_p])).flatten()
                 denom = logsumexp(self.log_total_p[i_p]) - np.log(self.n_draws)
-                v     = logsumexp(log_p + self.log_total_p[i_p] - denom) - np.log(self.n_draws)
-                return v, log_p
+                v     = logsumexp(log_p + self.log_total_p[i_p]) - np.log(self.n_draws)
+                return v - denom, log_p
     
     @probit
     def _log_predictive_mixture(self, x):
