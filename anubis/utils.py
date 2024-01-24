@@ -10,7 +10,9 @@ def get_samples(draws):
     Returns:
         :np.ndarray: samples
     """
-    return np.array([np.array([d.models[i+1].pars for i in range(len(d.models)-1)]).flatten() for d in draws])
+    ll = [[list(d.models[i+d.augment].pars) for i in range(len(d.models)-d.augment)] for d in draws]
+    # Funny way of doing the right thing. I may rewrite it in the future, but it works for now...
+    return np.array([s for d in ll for m in d for s in m]).reshape(len(draws), -1)
 
 def get_weights(draws):
     """
