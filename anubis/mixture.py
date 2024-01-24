@@ -53,16 +53,21 @@ class het_mixture:
         :iterable pars:            list of model parameters. Must be formatted as [[p1, p2, ...], [q1, q2, ...], ...]. Add empty list for no parameters.
         :np.ndarray:               weights
         :np.ndarray bounds:        bounds (FIGARO)
+        :bool augment:             whether the model includes a non-parametric augmentation
         
     Returns:
         :het_mixture: instance of het_mixture class
     """
-    def __init__(self, models, weights, bounds):
+    def __init__(self, models, weights, bounds, augment):
         self.models  = models
         self.weights = weights
         self.bounds  = np.atleast_2d(bounds)
         self.dim     = len(self.bounds)
-        self.probit  = models[0].probit
+        self.augment = augment
+        if self.augment:
+            self.probit = models[0].probit
+        else:
+            self.probit = False
     
     def __call__(self, x):
         return self.pdf(x)
@@ -81,6 +86,7 @@ class HMM:
     Arguments:
         :list-of-callbles:    models
         :iterable bounds:     boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
+        :iterable pars:       fixed parameters of the parametric model(s)
         :iterable prior_pars: NIW prior parameters (k, L, nu, mu)
         :iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
         :double n_draws:      number of draws for MC integral over parameters
@@ -107,7 +113,7 @@ class HMM:
             pars = [[] for _ in models]
             self.n_draws = 0
         if par_bounds is not None:
-            self.par_bounds = np.atleast_3d(par_bounds).reshape(len(models), -1, 2)
+            self.par_bounds = [np.atleast_2d(pb) for pb in par_bounds]
             self.n_draws = int(n_draws)
         else:
             self.par_bounds = None
@@ -115,7 +121,7 @@ class HMM:
         self.par_models = [par_model(mod, p, bounds, probit) for mod, p in zip(models, pars)]
         if self.par_bounds is not None:
             self.evaluated_logL = {}
-            self.par_draws      = np.atleast_2d([np.random.uniform(low = b[:,0], high = b[:,1], size    = (self.n_draws, len(b))) for b in self.par_bounds])
+            self.par_draws      = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) for b in self.par_bounds]
             self.log_total_p    = np.array([np.zeros(self.n_draws) for _ in range(len(self.par_models))])
             
         self.bounds       = np.atleast_2d(bounds)
@@ -142,27 +148,30 @@ class HMM:
         self.n_reassignments  = n_reassignments
          
         if gamma0 is None:
-            # Symmetric prior
             self.gamma0  = np.ones(self.n_components)
         else:
-            gamma0 = np.array(gamma0)
-            if len(gamma0) == self.n_components:
+            if not hasattr(gamma0, '__iter__'):
+                self.gamma0 = np.ones(self.n_components)*gamma0
+            elif len(gamma0) == self.n_components:
                 self.gamma0 = gamma0
             else:
-                raise Exception("gamma0 must be an array with {0} components.".format(self.n_components))
+                raise Exception("gamma0 must be an array with {0} components or a float.".format(self.n_components))
         self.weights = self.gamma0/np.sum(self.gamma0)
+    
+    def pdf(self, x):
+        return np.array([wi*mi.pdf(x) for wi, mi in zip(self.weights, self.models)]).sum(axis = 0)
     
     def __call__(self, x):
         return self.pdf(x)
     
     def initialise(self):
-        self.n_pts     = np.zeros(self.n_components)
-        self.weights   = self.gamma0/np.sum(self.gamma0)
+        self.n_pts        = np.zeros(self.n_components)
+        self.weights      = self.gamma0/np.sum(self.gamma0)
         self.stored_pts   = {}
         self.assignations = {}
         if self.par_bounds is not None:
             self.evaluated_logL = {}
-            self.par_draws      = np.atleast_2d([np.random.uniform(low = b[:,0], high = b[:,1], size    = (self.n_draws, len(b))) for b in self.par_bounds])
+            self.par_draws      = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) for b in self.par_bounds]
             self.log_total_p    = np.array([np.zeros(self.n_draws) for _ in range(len(self.par_models))])
         if self.augment:
             self.DPGMM.initialise()
@@ -172,7 +181,7 @@ class HMM:
         scores = np.zeros(self.n_components)
         vals   = np.zeros(shape = (self.n_components, self.n_draws))
         for i in range(self.n_components):
-            score, vals[i] = self._log_predictive_likelihood(x, i)
+            score, vals[i] = self._log_predictive_likelihood(x, i, pt_id)
             scores[i]      = score + np.log(self.gamma0[i] + self.n_pts[i])
         scores = np.exp(scores - logsumexp(scores))
         id = np.random.choice(self.n_components, p = scores)
@@ -187,32 +196,28 @@ class HMM:
                 self._reassign_point_DPGMM(x, id_DPGMM)
         # Parameter estimation
         elif self.par_bounds is not None:
-            if self.augment:
-                id_p = id-1
-            else:
-                id_p = id
-            self.log_total_p[id_p]    += vals[id]
-            self.evaluated_logL[pt_id] = vals[id]
+            self.evaluated_logL[pt_id] = vals
         self.assignations[pt_id] = int(id)
 
     def _reassign_point_DPGMM(self, x, id_DPGMM):
         self.DPGMM._assign_to_cluster(x, id_DPGMM)
         self.DPGMM.alpha = _update_alpha(self.DPGMM.alpha, self.DPGMM.n_pts, (np.array(self.DPGMM.N_list) > 0).sum(), self.DPGMM.alpha_0)
 
-    def _log_predictive_likelihood(self, x, i):
+    def _log_predictive_likelihood(self, x, i, pt_id):
         if self.augment and i == 0:
             return self._log_predictive_mixture(x), np.zeros(self.n_draws)
         else:
             if self.par_bounds is None:
                 return np.log(self.components[i].pdf(x)), np.zeros(self.n_draws)
             else:
-                if self.augment:
-                    i_p = i-1
+                i_p = i - self.augment
+                if not pt_id in list(self.evaluated_logL.keys()):
+                    log_p = np.log(self.components[i].pdf_pars(x, self.par_draws[i_p])).flatten()
                 else:
-                    i_p = i
-                log_p = np.log(self.components[i].pdf_pars(x, self.par_draws[i_p])).flatten()
-                denom = logsumexp(self.log_total_p[i_p]) - np.log(self.n_draws)
-                v     = logsumexp(log_p + self.log_total_p[i_p]) - np.log(self.n_draws)
+                    log_p = self.evaluated_logL[pt_id][i]
+                log_total_p = np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0)
+                denom       = logsumexp(log_total_p) - np.log(self.n_draws)
+                v           = logsumexp(log_p + log_total_p) - np.log(self.n_draws)
                 return v - denom, log_p
     
     @probit
@@ -221,10 +226,9 @@ class HMM:
         for j, i in enumerate(list(np.arange(self.DPGMM.n_cl)) + ["new"]):
             if i == "new":
                 ss = None
-                scores[j] = -np.log(self.volume)
             else:
                 ss = self.DPGMM.mixture[i]
-                scores[j] = self.DPGMM._log_predictive_likelihood(x, ss)
+            scores[j] = self.DPGMM._log_predictive_likelihood(x, ss)
             if ss is None:
                 scores[j] += np.log(self.DPGMM.alpha) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
             elif ss.N < 1:
@@ -244,35 +248,32 @@ class HMM:
         # Random Gibbs walk (if required)
         for id in np.random.choice(int(np.sum(self.n_pts)), size = self.n_reassignments, replace = True):
             self._reassign_point(int(id))
+        # Reassign all points once
+        for id in range(int(np.sum(self.n_pts))):
+            self._reassign_point(int(id))
         d = self.build_mixture()
         self.initialise()
         return d
     
     def _reassign_point(self, id):
-        x        = self.stored_pts[id]
-        cid      = self.assignations[id]
-        id_DPGMM = None
-        self.n_pts[cid] -= 1
+        x                     = self.stored_pts[id]
+        cid                   = self.assignations[id]
+        id_DPGMM              = None
+        self.n_pts[cid]      -= 1
+        self.assignations[id] = None
         if self.augment and cid == 0:
             id_DPGMM  = self.ids_DPGMM[id]
-            cid_DPGMM = self.DPGMM.assignations[id_DPGMM]
-            self.DPGMM._remove_from_cluster(x, cid_DPGMM)
-        elif self.par_bounds is not None:
-            sefl.log_total_p[cid] -= self.evaluated_logL[id]
+            self.DPGMM._remove_from_cluster(x, self.DPGMM.assignations[id_DPGMM])
         self._assign_to_component(x, id, id_DPGMM = id_DPGMM, reassign = True)
-
-    def _remove_from_component(self, x, cid):
-        self. self.evaluated_logL
-
-    def pdf(self, x):
-        return np.array([wi*mi.pdf(x) for wi, mi in zip(self.weights, self.models)]).sum(axis = 0)
     
     def build_mixture(self):
         if self.par_bounds is not None:
             par_vals = []
             for i in range(len(self.par_models)):
-                pars     = self.par_draws[i].T
-                vals     = np.exp(self.log_total_p[i] - logsumexp(self.log_total_p[i]))
+                pars        = self.par_draws[i].T
+                i_p         = i + self.augment
+                log_total_p = np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0)
+                vals        = np.exp(log_total_p - logsumexp(log_total_p))
                 par_vals.append(np.atleast_1d([np.random.choice(p, p = vals) for p in pars]))
             par_models = [par_model(m.model, par, self.bounds, self.probit) for m, par in zip(self.par_models, par_vals)]
         else:
@@ -286,7 +287,7 @@ class HMM:
                 models = [nonpar] + par_models
         else:
             models = par_models
-        return het_mixture(models, dirichlet(self.n_pts+self.gamma0).rvs()[0], self.bounds)
+        return het_mixture(models, dirichlet(self.n_pts+self.gamma0).rvs()[0], self.bounds, self.augment)
         
 class HierHMM(HMM):
     """
