@@ -1,11 +1,11 @@
 import numpy as np
-from scipy.special import logsumexp
 from scipy.stats import dirichlet
 
 from figaro.mixture import DPGMM, HDPGMM, _update_alpha
 from figaro.decorators import probit
 from figaro.transform import probit_logJ
 from figaro._likelihood import evaluate_mixture_MC_draws, evaluate_mixture_MC_draws_1d
+from figaro._numba_functions import logsumexp_jit
 
 np.seterr(divide = 'ignore')
 
@@ -92,6 +92,9 @@ class HMM:
         :double n_draws:      number of draws for MC integral over parameters
         :double alpha0:       initial guess for concentration parameter
         :np.array gamma0:     Dirichlet Distribution prior
+        :bool probit:         whether to use the probit transformation for the DPGMM
+        :bool augment:        whether to include the non-parametric channel
+        :int n_reassignments: number of reassignments
     
     Returns:
         :HMM: instance of HMM class
@@ -108,35 +111,34 @@ class HMM:
                        augment         = True,
                        n_reassignments = 0.,
                        ):
-                       
         if pars is None:
             pars = [[] for _ in models]
             self.n_draws = 0
         if par_bounds is not None:
-            self.par_bounds = [np.atleast_2d(pb) for pb in par_bounds]
+            self.par_bounds = [np.atleast_2d(pb) if pb is not None else None for pb in par_bounds]
             self.n_draws = int(n_draws)
         else:
             self.par_bounds = None
-                
+        # Parametric models
         self.par_models = [par_model(mod, p, bounds, probit) for mod, p in zip(models, pars)]
         if self.par_bounds is not None:
             self.evaluated_logL = {}
-            self.par_draws      = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) for b in self.par_bounds]
+            self.par_draws      = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) if b is not None else None for b in self.par_bounds]
             self.log_total_p    = np.array([np.zeros(self.n_draws) for _ in range(len(self.par_models))])
-            
+        # Settings
         self.bounds       = np.atleast_2d(bounds)
         self.dim          = len(self.bounds)
         self.probit       = probit
         self.augment      = augment
-        
+        # DPGMM initialisation (if required)
         if self.augment:
-            self.DPGMM        = DPGMM(bounds = bounds,
-                                      prior_pars = prior_pars,
-                                      alpha0 = alpha0,
-                                      probit = self.probit,
-                                      )
-            self.volume       = np.prod(np.diff(self.DPGMM.bounds, axis = 1))
-            self.components   = [self.DPGMM] + self.par_models
+            self.nonpar = DPGMM(bounds     = bounds,
+                                prior_pars = prior_pars,
+                                alpha0     = alpha0,
+                                probit     = self.probit,
+                                )
+            self.volume       = np.prod(np.diff(self.nonpar.bounds, axis = 1))
+            self.components   = [self.nonpar] + self.par_models
             self.n_components = len(models) + 1
             self.ids_DPGMM    = {}
         else:
@@ -148,7 +150,7 @@ class HMM:
         self.n_reassignments  = n_reassignments
          
         if gamma0 is None:
-            self.gamma0  = np.ones(self.n_components)
+            self.gamma0 = np.ones(self.n_components)
         else:
             if not hasattr(gamma0, '__iter__'):
                 self.gamma0 = np.ones(self.n_components)*gamma0
@@ -171,43 +173,43 @@ class HMM:
         self.assignations = {}
         if self.par_bounds is not None:
             self.evaluated_logL = {}
-            self.par_draws      = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) for b in self.par_bounds]
+            self.par_draws      = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) if b is not None else None for b in self.par_bounds]
             self.log_total_p    = np.array([np.zeros(self.n_draws) for _ in range(len(self.par_models))])
         if self.augment:
-            self.DPGMM.initialise()
+            self.nonpar.initialise()
             self.ids_DPGMM = {}
 
     def _assign_to_component(self, x, pt_id, id_DPGMM = None, reassign = False):
-        scores = np.zeros(self.n_components)
-        vals   = np.zeros(shape = (self.n_components, self.n_draws))
+        scores             = np.zeros(self.n_components)
+        vals               = np.zeros(shape = (self.n_components, self.n_draws))
         for i in range(self.n_components):
             score, vals[i] = self._log_predictive_likelihood(x, i, pt_id)
             scores[i]      = score + np.log(self.gamma0[i] + self.n_pts[i])
-        scores = np.exp(scores - logsumexp(scores))
-        id = np.random.choice(self.n_components, p = scores)
-        self.n_pts[id] += 1
-        self.weights = (self.n_pts + self.gamma0)/np.sum(self.n_pts + self.gamma0)
+        scores             = np.exp(scores - logsumexp_jit(scores))
+        id                 = np.random.choice(self.n_components, p = scores)
+        self.n_pts[id]    += 1
+        self.weights       = (self.n_pts + self.gamma0)/np.sum(self.n_pts + self.gamma0)
         # If DPGMM, updates mixture
         if self.augment and id == 0:
             if id_DPGMM is None:
-                self.ids_DPGMM[int(pt_id)] = len(list(self.DPGMM.stored_pts.keys()))
-                self.DPGMM.add_new_point(x)
+                self.ids_DPGMM[int(pt_id)] = len(list(self.nonpar.stored_pts.keys()))
+                self.nonpar.add_new_point(x)
             else:
                 self._reassign_point_DPGMM(x, id_DPGMM)
         # Parameter estimation
         elif self.par_bounds is not None:
             self.evaluated_logL[pt_id] = vals
-        self.assignations[pt_id] = int(id)
+        self.assignations[pt_id]       = int(id)
 
     def _reassign_point_DPGMM(self, x, id_DPGMM):
-        self.DPGMM._assign_to_cluster(x, id_DPGMM)
-        self.DPGMM.alpha = _update_alpha(self.DPGMM.alpha, self.DPGMM.n_pts, (np.array(self.DPGMM.N_list) > 0).sum(), self.DPGMM.alpha_0)
+        self.nonpar._assign_to_cluster(x, id_DPGMM)
+        self.nonpar.alpha = _update_alpha(self.nonpar.alpha, self.nonpar.n_pts, (np.array(self.nonpar.N_list) > 0).sum(), self.nonpar.alpha_0)
 
     def _log_predictive_likelihood(self, x, i, pt_id):
         if self.augment and i == 0:
             return self._log_predictive_mixture(x), np.zeros(self.n_draws)
         else:
-            if self.par_bounds is None:
+            if self.par_bounds is None or self.par_bounds[i - self.augment] is None:
                 return np.log(self.components[i].pdf(x)), np.zeros(self.n_draws)
             else:
                 i_p = i - self.augment
@@ -215,27 +217,27 @@ class HMM:
                     log_p = np.log(self.components[i].pdf_pars(x, self.par_draws[i_p])).flatten()
                 else:
                     log_p = self.evaluated_logL[pt_id][i]
-                log_total_p = np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0)
-                denom       = logsumexp(log_total_p) - np.log(self.n_draws)
-                v           = logsumexp(log_p + log_total_p) - np.log(self.n_draws)
-                return v - denom, log_p
+                log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0))
+                denom       = logsumexp_jit(log_total_p) - np.log(self.n_draws)
+                v           = logsumexp_jit(log_p + log_total_p) - np.log(self.n_draws)
+                return np.nan_to_num(v - denom, nan = -np.inf, neginf = -np.inf), log_p
     
     @probit
     def _log_predictive_mixture(self, x):
-        scores = np.zeros(self.DPGMM.n_cl + 1)
-        for j, i in enumerate(list(np.arange(self.DPGMM.n_cl)) + ["new"]):
+        scores = np.zeros(self.nonpar.n_cl + 1)
+        for j, i in enumerate(list(np.arange(self.nonpar.n_cl)) + ["new"]):
             if i == "new":
                 ss = None
             else:
-                ss = self.DPGMM.mixture[i]
-            scores[j] = self.DPGMM._log_predictive_likelihood(x, ss)
+                ss = self.nonpar.mixture[i]
+            scores[j] = self.nonpar._log_predictive_likelihood(x, ss)
             if ss is None:
-                scores[j] += np.log(self.DPGMM.alpha) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
+                scores[j] += np.log(self.nonpar.alpha) - np.log(self.nonpar.n_pts + self.nonpar.alpha)
             elif ss.N < 1:
                 scores[j]  = -np.inf
             else:
-                scores[j] += np.log(ss.N) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
-        return logsumexp(scores)
+                scores[j] += np.log(ss.N) - np.log(self.nonpar.n_pts + self.nonpar.alpha)
+        return logsumexp_jit(scores)
     
     def add_new_point(self, x, pt_id = None):
         self.stored_pts[int(np.sum(self.n_pts))] = np.atleast_2d(x)
@@ -263,27 +265,30 @@ class HMM:
         self.assignations[id] = None
         if self.augment and cid == 0:
             id_DPGMM  = self.ids_DPGMM[id]
-            self.DPGMM._remove_from_cluster(x, self.DPGMM.assignations[id_DPGMM])
+            self.nonpar._remove_from_cluster(x, self.nonpar.assignations[id_DPGMM])
         self._assign_to_component(x, id, id_DPGMM = id_DPGMM, reassign = True)
     
     def build_mixture(self):
         if self.par_bounds is not None:
             par_vals = []
             for i in range(len(self.par_models)):
-                pars        = self.par_draws[i].T
-                i_p         = i + self.augment
-                log_total_p = np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0)
-                vals        = np.exp(log_total_p - logsumexp(log_total_p))
-                par_vals.append(np.atleast_1d([np.random.choice(p, p = vals) for p in pars]))
+                if self.par_draws[i] is not None:
+                    pars        = self.par_draws[i].T
+                    i_p         = i + self.augment
+                    log_total_p = np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0)
+                    vals        = np.exp(log_total_p - logsumexp_jit(log_total_p))
+                    par_vals.append(np.atleast_1d([np.random.choice(p, p = vals) for p in pars]))
+                else:
+                    par_vals.append([])
             par_models = [par_model(m.model, par, self.bounds, self.probit) for m, par in zip(self.par_models, par_vals)]
         else:
             par_models = self.par_models
         
         if self.augment:
-            if self.DPGMM.n_pts == 0:
+            if self.nonpar.n_pts == 0:
                 models = [par_model(uniform, [1./self.volume], self.bounds, self.probit)] + par_models
             else:
-                nonpar = self.DPGMM.build_mixture()
+                nonpar = self.nonpar.build_mixture()
                 models = [nonpar] + par_models
         else:
             models = par_models
@@ -331,15 +336,15 @@ class HierHMM(HMM):
                          gamma0          = gamma0,
                          probit          = probit,
                          augment         = augment,
-                         n_reassignments = n_reassignments
+                         n_reassignments = n_reassignments,
                          )
-        
+        # (H)DPGMM initialisation (if required)
         if self.augment:
-            self.DPGMM       = HDPGMM(bounds     = bounds,
+            self.nonpar      = HDPGMM(bounds     = bounds,
                                       prior_pars = prior_pars,
                                       alpha0     = alpha0,
                                       probit     = self.probit)
-            self.components  = [self.DPGMM] + self.par_models
+            self.components  = [self.nonpar] + self.par_models
 
         self.n_draws_evs = int(n_draws_evs)
         
@@ -356,29 +361,29 @@ class HierHMM(HMM):
                 else:
                     i_p = i
                 log_p = np.log([np.mean(self.components[i].pdf_pars(samps, pars)) for pars in self.par_draws[i_p]]).flatten()
-                v     = logsumexp(log_p + self.log_total_p[i_p]) - logsumexp(self.log_total_p[i_p])
+                v     = logsumexp_jit(log_p + self.log_total_p[i_p]) - logsumexp_jit(self.log_total_p[i_p])
                 return v, log_p
 
     @probit
     def _log_predictive_mixture(self, x):
-        scores = np.zeros(self.DPGMM.n_cl + 1)
+        scores = np.zeros(self.nonpar.n_cl + 1)
         if self.dim == 1:
-            logL_x = evaluate_mixture_MC_draws_1d(self.DPGMM.mu_MC, self.DPGMM.sigma_MC, x.means, x.covs, x.w)
+            logL_x = evaluate_mixture_MC_draws_1d(self.nonpar.mu_MC, self.nonpar.sigma_MC, x.means, x.covs, x.w)
         else:
-            logL_x = evaluate_mixture_MC_draws(self.DPGMM.mu_MC, self.DPGMM.sigma_MC, x.means, x.covs, x.w)
-        for j, i in enumerate(list(np.arange(self.DPGMM.n_cl)) + ["new"]):
+            logL_x = evaluate_mixture_MC_draws(self.nonpar.mu_MC, self.nonpar.sigma_MC, x.means, x.covs, x.w)
+        for j, i in enumerate(list(np.arange(self.nonpar.n_cl)) + ["new"]):
             if i == "new":
                 ss     = None
-                logL_D = np.zeros(self.DPGMM.MC_draws)
+                logL_D = np.zeros(self.nonpar.MC_draws)
             else:
-                ss     = self.DPGMM.mixture[i]
+                ss     = self.nonpar.mixture[i]
                 logL_D = ss.logL_D
-            scores[j] = logsumexp(logL_D + logL_x) - logsumexp(logL_D)
+            scores[j] = logsumexp_jit(logL_D + logL_x) - logsumexp_jit(logL_D)
             if ss is None:
-                scores[j] += np.log(self.DPGMM.alpha) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
+                scores[j] += np.log(self.nonpar.alpha) - np.log(self.nonpar.n_pts + self.nonpar.alpha)
             else:
-                scores[j] += np.log(ss.N) - np.log(self.DPGMM.n_pts + self.DPGMM.alpha)
-        return logsumexp(scores)
+                scores[j] += np.log(ss.N) - np.log(self.nonpar.n_pts + self.nonpar.alpha)
+        return logsumexp_jit(scores)
     
     def add_new_point(self, ev):
         x = np.random.choice(ev)
