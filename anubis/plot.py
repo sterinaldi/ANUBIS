@@ -77,7 +77,7 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
 
     x    = np.linspace(x_min, x_max, n_pts)
     dx   = x[1]-x[0]
-    probs = np.array([np.sum([d.weights[i+1]*model(x) for i, model in enumerate(d.models[1:])], axis = 0) for d in draws])
+    probs = np.array([np.sum([d.weights[i+d.augment]*model(x) for i, model in enumerate(d.models[d.augment:])], axis = 0) for d in draws])
     probs = np.array([p/np.sum(p*dx) for p in probs])
     
     figaro_plot_1d_dist(x                = x,
@@ -125,7 +125,10 @@ def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, 
         :iterable levels:                 credible levels to plot
         :bool scatter_points:             scatter samples on 2d plots
     """
-    
+    if not np.array([d.augment for d in draws]).all():
+        warnings.warn("No non-parametric augmentation. No plot produced.")
+        return
+        
     nonpar = [d.models[0] for d in draws]
     
     if draws[0].dim == 1:
@@ -206,9 +209,10 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
             plot_name = name + '_pars.pdf'
         else:
             plot_name = 'parameters.pdf'
-            
-        if pars_labels is None or not (len(pars_labels) == samples.shape[-1]):
-            parameters_labels = ['$p_{0}$'.format(i+1) for i in range(samples.shape[-1])]
+        
+        n_parameters = int(np.sum([len(m.pars) for m in draws[0].models[draws[0].augment:]]))
+        if pars_labels is None or not (len(pars_labels) == n_parameters):
+            parameters_labels = ['$\\theta_{0}$'.format(i+1) for i in range(n_parameters)]
         else:
             parameters_labels = ['${0}$'.format(l) for l in pars_labels]
 
@@ -222,11 +226,14 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
             plot_name = name + '_weights.pdf'
         else:
             plot_name = 'weights.pdf'
-            
-        if par_models_labels is None or not (len(par_models_labels) == (samples.shape[-1]-1)):
-            weights_labels = ['$w_{np}$'] + ['$w_{'+'{0}'.format(i+1)+'}$' for i in range(samples.shape[-1]-1)]
+        
+        n_par_models = len(draws[0].models)-draws[0].augment
+        if par_models_labels is None or not (len(par_models_labels) == n_par_models):
+            weights_labels = ['$w_{'+'{0}'.format(i+1)+'}$' for i in range(n_par_models)]
         else:
-            weights_labels = ['$w_{np}$'] + ['$w_{'+'{0}'.format(l)+'}$' for l in par_models_labels]
+            weights_labels = ['$w_{'+'{0}'.format(l)+'}$' for l in par_models_labels]
+        if np.array([d.augment for d in draws]).all():
+            weights_labels = ['$w_{np}$'] + weights_labels
 
         c = corner(samples, labels = weights_labels, truths = true_weights, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
         c.savefig(Path(out_folder, plot_name), bbox_inches = 'tight')
@@ -234,23 +241,27 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
 
     if plot in ['joint', 'all']:
         samples  = get_samples_and_weights(draws)
-        n_models = len(draws[0].models)
         if name is not None:
             plot_name = name + '_joint.pdf'
         else:
             plot_name = 'joint.pdf'
-            
-        if pars_labels is None or not (len(pars_labels) == (samples.shape[-1]-n_models)):
-            parameters_labels = ['$p_{0}$'.format(i+1) for i in range(samples.shape[-1]-n_models)]
+
+        n_par_models = len(draws[0].models)-draws[0].augment
+        n_parameters = int(np.sum([len(m.pars) for m in draws[0].models[draws[0].augment:]]))
+        if pars_labels is None or not (len(pars_labels) == n_parameters):
+            parameters_labels = ['$\\theta_{0}$'.format(i+1) for i in range(n_parameters)]
         else:
             parameters_labels = ['${0}$'.format(l) for l in pars_labels]
-        if par_models_labels is None or not (len(par_models_labels) == (n_models-1)):
-            weights_labels = ['$w_{np}$'] + ['$w_{'+'{0}'.format(i+1)+'}$' for i in range(n_models-1)]
+
+        if par_models_labels is None or not (len(par_models_labels) == n_par_models):
+            weights_labels = ['$w_{'+'{0}'.format(i+1)+'}$' for i in range(n_par_models)]
         else:
-            weights_labels = ['$w_{np}$'] + ['$w_{'+'{0}'.format(l)+'}$' for l in par_models_labels]
-        
+            weights_labels = ['$w_{'+'{0}'.format(l)+'}$' for l in par_models_labels]
+
+        if np.array([d.augment for d in draws]).all():
+            weights_labels = ['$w_{np}$'] + weights_labels
+
         joint_labels = parameters_labels + weights_labels
-        
         if true_pars is None:
             true_pars = [None for _ in range(len(pars_labels))]
         if true_weights is None:
