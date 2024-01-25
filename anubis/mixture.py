@@ -21,28 +21,57 @@ class par_model:
         :iterable pars:     parameters of the model
         :np.ndarray bounds: bounds (FIGARO)
         :bool probit:       whether to use the probit transformation or not (FIGARO compatibility)
+        :callable selfunc:  selection function
     
     Returns:
         :par_model: instance of model class
     """
-    def __init__(self, model, pars, bounds, probit):
-        self.model  = model
-        self.pars   = pars
-        self.bounds = np.atleast_2d(bounds)
-        self.dim    = len(self.bounds)
-        self.probit = probit
-        
+    def __init__(self, model,
+                       pars,
+                       bounds,
+                       probit,
+                       selfunc = None,
+                       ):
+        self.model   = model
+        self.pars    = pars
+        self.bounds  = np.atleast_2d(bounds)
+        self.dim     = len(self.bounds)
+        self.probit  = probit
+        self.selfunc = selfunc
+        self.norm    = None
+    
+    def _selfunc(func):
+        def observed_model(self, pars, x):
+            if self.selfunc is not None:
+                return func(self, pars, x)*self.selfunc(x)
+            else:
+                return func(self, pars, x)
+        return observed_model
+    
     def __call__(self, x):
         return self.pdf(x)
-
+    
+    def _compute_normalisation(self, pars, n_draws):
+        self.norm = None
+        samples   = np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (n_draws, len(self.bounds)))
+        volume    = np.prod(np.diff(self.bounds, axis = 1))
+        self.norm = np.mean(self.pdf_pars(samples, pars)*volume, axis = 1)
+        
     def pdf(self, x):
         return self.model(x, *self.pars)
     
-    def pdf_pars(self, x, pars):
-        return np.apply_along_axis(self._model, 1, pars, x)
+    def pdf_observed(self, x):
+        return self._model(x, *self.pars)
     
-    def _model(self, pars, x):
-        return self.model(x, *pars)
+    def pdf_pars(self, x, pars):
+        if self.norm is not None:
+            return np.array([self._model(x, p)/n for p, n in zip(pars, self.norm)])
+        else:
+            return np.array([self._model(x, p) for p in pars])
+    
+    @_selfunc
+    def _model(self, x, pars):
+        return self.model(x, *pars).flatten()
 
 class het_mixture:
     """
@@ -89,9 +118,11 @@ class HMM:
         :iterable pars:       fixed parameters of the parametric model(s)
         :iterable prior_pars: NIW prior parameters (k, L, nu, mu)
         :iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
-        :double n_draws:      number of draws for MC integral over parameters
+        :callable selfunc:    selection function (if required)
+        :double n_draws_pars: number of draws for MC integral over parameters
+        :double n_draws_pars: number of draws for normalisation MC integral over parameters
         :double alpha0:       initial guess for concentration parameter
-        :np.array gamma0:     Dirichlet Distribution prior
+        :np.ndarray gamma0:   Dirichlet Distribution prior
         :bool probit:         whether to use the probit transformation for the DPGMM
         :bool augment:        whether to include the non-parametric channel
         :int n_reassignments: number of reassignments
@@ -104,32 +135,33 @@ class HMM:
                        pars            = None,
                        par_bounds      = None,
                        prior_pars      = None,
-                       n_draws         = 1e3,
+                       selfunc         = None,
+                       n_draws_pars    = 1e3,
+                       n_draws_norm    = 1e5,
                        alpha0          = 1.,
                        gamma0          = None,
                        probit          = False,
                        augment         = True,
                        n_reassignments = 0.,
                        ):
-        if pars is None:
-            pars = [[] for _ in models]
-            self.n_draws = 0
-        if par_bounds is not None:
-            self.par_bounds = [np.atleast_2d(pb) if pb is not None else None for pb in par_bounds]
-            self.n_draws = int(n_draws)
-        else:
-            self.par_bounds = None
-        # Parametric models
-        self.par_models = [par_model(mod, p, bounds, probit) for mod, p in zip(models, pars)]
-        if self.par_bounds is not None:
-            self.evaluated_logL = {}
-            self.par_draws      = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) if b is not None else None for b in self.par_bounds]
-            self.log_total_p    = np.array([np.zeros(self.n_draws) for _ in range(len(self.par_models))])
         # Settings
         self.bounds       = np.atleast_2d(bounds)
         self.dim          = len(self.bounds)
         self.probit       = probit
         self.augment      = augment
+        self.selfunc      = selfunc
+        # Parametric models
+        if pars is None:
+            pars = [[] for _ in models]
+            self.n_draws_pars = 0
+        if par_bounds is not None:
+            self.par_bounds = [np.atleast_2d(pb) if pb is not None else None for pb in par_bounds]
+            self.n_draws_pars = int(n_draws_pars)
+        else:
+            self.par_bounds = None
+        if self.selfunc is not None:
+            self.n_draws_norm = int(n_draws_norm)
+        self.par_models = [par_model(mod, p, bounds, probit, selfunc) for mod, p in zip(models, pars)]
         # DPGMM initialisation (if required)
         if self.augment:
             self.nonpar = DPGMM(bounds     = bounds,
@@ -140,15 +172,11 @@ class HMM:
             self.volume       = np.prod(np.diff(self.nonpar.bounds, axis = 1))
             self.components   = [self.nonpar] + self.par_models
             self.n_components = len(models) + 1
-            self.ids_DPGMM    = {}
         else:
             self.components = self.par_models
             self.n_components = len(models)
-        self.stored_pts       = {}
-        self.assignations     = {}
-        self.n_pts            = np.zeros(self.n_components)
+        # Gibbs sampler
         self.n_reassignments  = n_reassignments
-         
         if gamma0 is None:
             self.gamma0 = np.ones(self.n_components)
         else:
@@ -158,7 +186,8 @@ class HMM:
                 self.gamma0 = gamma0
             else:
                 raise Exception("gamma0 must be an array with {0} components or a float.".format(self.n_components))
-        self.weights = self.gamma0/np.sum(self.gamma0)
+        # Initialisation
+        self.initialise()
     
     def pdf(self, x):
         return np.array([wi*mi.pdf(x) for wi, mi in zip(self.weights, self.models)]).sum(axis = 0)
@@ -173,15 +202,17 @@ class HMM:
         self.assignations = {}
         if self.par_bounds is not None:
             self.evaluated_logL = {}
-            self.par_draws      = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws, len(b))) if b is not None else None for b in self.par_bounds]
-            self.log_total_p    = np.array([np.zeros(self.n_draws) for _ in range(len(self.par_models))])
+            self.par_draws      = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws_pars, len(b))) if b is not None else None for b in self.par_bounds]
+            self.log_total_p    = np.array([np.zeros(self.n_draws_pars) for _ in range(len(self.par_models))])
+        if self.selfunc is not None:
+            [m._compute_normalisation(p, self.n_draws_norm) for m, p in zip(self.components[self.augment:], self.par_draws)]
         if self.augment:
             self.nonpar.initialise()
             self.ids_DPGMM = {}
 
     def _assign_to_component(self, x, pt_id, id_DPGMM = None, reassign = False):
         scores             = np.zeros(self.n_components)
-        vals               = np.zeros(shape = (self.n_components, self.n_draws))
+        vals               = np.zeros(shape = (self.n_components, self.n_draws_pars))
         for i in range(self.n_components):
             score, vals[i] = self._log_predictive_likelihood(x, i, pt_id)
             scores[i]      = score + np.log(self.gamma0[i] + self.n_pts[i])
@@ -207,10 +238,10 @@ class HMM:
 
     def _log_predictive_likelihood(self, x, i, pt_id):
         if self.augment and i == 0:
-            return self._log_predictive_mixture(x), np.zeros(self.n_draws)
+            return self._log_predictive_mixture(x), np.zeros(self.n_draws_pars)
         else:
             if self.par_bounds is None or self.par_bounds[i - self.augment] is None:
-                return np.log(self.components[i].pdf(x)), np.zeros(self.n_draws)
+                return np.log(self.components[i].pdf(x)), np.zeros(self.n_draws_pars)
             else:
                 i_p = i - self.augment
                 if not pt_id in list(self.evaluated_logL.keys()):
@@ -218,8 +249,8 @@ class HMM:
                 else:
                     log_p = self.evaluated_logL[pt_id][i]
                 log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0))
-                denom       = logsumexp_jit(log_total_p) - np.log(self.n_draws)
-                v           = logsumexp_jit(log_p + log_total_p) - np.log(self.n_draws)
+                denom       = logsumexp_jit(log_total_p) - np.log(self.n_draws_pars)
+                v           = logsumexp_jit(log_p + log_total_p) - np.log(self.n_draws_pars)
                 return np.nan_to_num(v - denom, nan = -np.inf, neginf = -np.inf), log_p
     
     @probit
@@ -280,7 +311,7 @@ class HMM:
                     par_vals.append(np.atleast_1d([np.random.choice(p, p = vals) for p in pars]))
                 else:
                     par_vals.append([])
-            par_models = [par_model(m.model, par, self.bounds, self.probit) for m, par in zip(self.par_models, par_vals)]
+            par_models = [par_model(m.model, par, self.bounds, self.probit, self.selfunc) for m, par in zip(self.par_models, par_vals)]
         else:
             par_models = self.par_models
         
@@ -306,8 +337,9 @@ class HierHMM(HMM):
         :iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
         :double n_draws_pars: number of draws for MC integral over parameters
         :double n_draws_evs:  number of draws for MC integral over events
+        :doubne MC_draws:     number of draws for MC integral for (H)DPGMM
         :double alpha0:       initial guess for concentration parameter
-        :np.array gamma0:     Dirichlet Distribution prior
+        :np.ndarray gamma0:   Dirichlet Distribution prior
     
     Returns:
         :HierHMM: instance of HierHMM class
@@ -319,6 +351,7 @@ class HierHMM(HMM):
                        prior_pars      = None,
                        n_draws_pars    = 1e3,
                        n_draws_evs     = 1e3,
+                       MC_draws        = None,
                        alpha0          = 1.,
                        gamma0          = None,
                        probit          = False,
@@ -331,7 +364,7 @@ class HierHMM(HMM):
                          pars            = pars,
                          par_bounds      = par_bounds,
                          prior_pars      = prior_pars,
-                         n_draws         = n_draws_pars,
+                         n_draws_pars    = n_draws_pars,
                          alpha0          = alpha0,
                          gamma0          = gamma0,
                          probit          = probit,
@@ -343,18 +376,19 @@ class HierHMM(HMM):
             self.nonpar      = HDPGMM(bounds     = bounds,
                                       prior_pars = prior_pars,
                                       alpha0     = alpha0,
-                                      probit     = self.probit)
+                                      probit     = self.probit,
+                                      MC_draws   = MC_draws,
+                                      )
             self.components  = [self.nonpar] + self.par_models
-
         self.n_draws_evs = int(n_draws_evs)
         
     def _log_predictive_likelihood(self, x, i):
         if self.augment and i == 0:
-            return self._log_predictive_mixture(x), np.zeros(self.n_draws)
+            return self._log_predictive_mixture(x), np.zeros(self.n_draws_pars)
         else:
             samps = x.rvs(self.n_draws_evs)
             if self.par_bounds is None:
-                return np.log(np.mean(self.components[i].pdf(samps))), np.zeros(self.n_draws)
+                return np.log(np.mean(self.components[i].pdf(samps))), np.zeros(self.n_draws_pars)
             else:
                 if self.augment:
                     i_p = i-1
