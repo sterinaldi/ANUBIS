@@ -99,7 +99,7 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
                         logy             = logy,
                         )
 
-def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, bounds = None, out_folder = '.', name = 'DPGMM', n_pts = None, labels = None, units = None, hierarchical = False, show = False, save = True, subfolder = False, true_value = None, true_value_label = '\mathrm{True\ value}', injected_label = '\mathrm{Simulated}', figsize = 7, levels = [0.5, 0.68, 0.9], scatter_points = False):
+def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, bounds = None, out_folder = '.', name = 'nonparametric', n_pts = None, labels = None, units = None, hierarchical = False, show = False, save = True, subfolder = False, true_value = None, true_value_label = '\mathrm{True\ value}', injected_label = '\mathrm{Simulated}', figsize = 7, levels = [0.5, 0.68, 0.9], scatter_points = False):
     """
     Plot the recovered non-parametric distribution along with samples from the true distribution (if available).
     
@@ -233,7 +233,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
         else:
             weights_labels = ['$w_{'+'{0}'.format(l)+'}$' for l in par_models_labels]
         if np.array([d.augment for d in draws]).all():
-            weights_labels = ['$w_{np}$'] + weights_labels
+            weights_labels = ['$w_\\mathrm{np}$'] + weights_labels
 
         c = corner(samples, labels = weights_labels, truths = true_weights, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
         c.savefig(Path(out_folder, plot_name), bbox_inches = 'tight')
@@ -259,7 +259,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
             weights_labels = ['$w_{'+'{0}'.format(l)+'}$' for l in par_models_labels]
 
         if np.array([d.augment for d in draws]).all():
-            weights_labels = ['$w_{np}$'] + weights_labels
+            weights_labels = ['$w_\\mathrm{np}$'] + weights_labels
 
         joint_labels = parameters_labels + weights_labels
         if true_pars is None:
