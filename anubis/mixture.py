@@ -3,7 +3,7 @@ from scipy.stats import dirichlet
 
 from figaro.mixture import DPGMM, HDPGMM, _update_alpha
 from figaro.decorators import probit
-from figaro.transform import probit_logJ
+from figaro.utils import rejection_sampler
 from figaro._likelihood import evaluate_mixture_MC_draws, evaluate_mixture_MC_draws_1d
 from figaro._numba_functions import logsumexp_jit
 
@@ -38,14 +38,14 @@ class par_model:
         self.dim     = len(self.bounds)
         self.probit  = probit
         self.selfunc = selfunc
-        self.norm    = None
+        self.norm    = 1.
     
     def _selfunc(func):
-        def observed_model(self, pars, x):
+        def observed_model(self, x, *args):
             if self.selfunc is not None:
-                return func(self, pars, x)*self.selfunc(x)
+                return func(self, x, *args)*self.selfunc(x)
             else:
-                return func(self, pars, x)
+                return func(self, x, *args)
         return observed_model
     
     def __call__(self, x):
@@ -53,15 +53,30 @@ class par_model:
     
     def _compute_normalisation(self, pars, n_draws):
         self.norm = None
-        samples   = np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (n_draws, len(self.bounds)))
         volume    = np.prod(np.diff(self.bounds, axis = 1))
-        self.norm = np.mean(self.pdf_pars(samples, pars)*volume, axis = 1)
-        
-    def pdf(self, x):
-        return self.model(x, *self.pars)
+        import matplotlib.pyplot as plt
+#        samples   = rejection_sampler(int(n_draws), self.selfunc, self.bounds)
+#        ss        = np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (n_draws, len(self.bounds)))
+#        sf_n      = np.mean(self.selfunc(ss)/volume)
+        x = np.linspace(self.bounds[0,0], self.bounds[0,1], 10000)
+        dx = x[1]-x[0]
+        if pars is not None:
+#            self.norm = np.atleast_1d([np.sum(self.model(samples, p).flatten()*sf_n) for p in pars])
+            self.norm = np.atleast_1d([np.sum(self._model(x, p)*dx) for p in pars])
+#            plt.hist(nn, histtype = 'step', density = True)'
+#            plt.show()
+#            exit()
+        else:
+            self.norm = np.atleast_1d(np.sum(self.pdf(samples)))
+        if len(self.norm) == 1:
+            self.norm = self.norm[0]
     
-    def pdf_observed(self, x):
-        return self._model(x, *self.pars)
+    @_selfunc
+    def pdf(self, x):
+        return self.model(x, *self.pars)/self.norm
+    
+    def pdf_intrinsic(self, x):
+        return self.model(x, *self.pars)
     
     def pdf_pars(self, x, pars):
         if self.norm is not None:
@@ -83,16 +98,18 @@ class het_mixture:
         :np.ndarray:               weights
         :np.ndarray bounds:        bounds (FIGARO)
         :bool augment:             whether the model includes a non-parametric augmentation
+        :callable selfunc:         selection function
         
     Returns:
         :het_mixture: instance of het_mixture class
     """
-    def __init__(self, models, weights, bounds, augment):
+    def __init__(self, models, weights, bounds, augment, selfunc = None):
         self.models  = models
         self.weights = weights
         self.bounds  = np.atleast_2d(bounds)
         self.dim     = len(self.bounds)
         self.augment = augment
+        self.selfunc = selfunc
         if self.augment:
             self.probit = models[0].probit
         else:
@@ -103,6 +120,9 @@ class het_mixture:
     
     def pdf(self, x):
         return np.array([wi*mi.pdf(x) for wi, mi in zip(self.weights, self.models)]).sum(axis = 0)
+
+    def pdf_intrinsic(self, x):
+        return np.array([wi*mi.pdf_intrinsic(x) for wi, mi in zip(self.weights[self.augment:], self.models[self.augment:])]).sum(axis = 0)
 
 #-----------------#
 # Inference class #
@@ -137,7 +157,7 @@ class HMM:
                        prior_pars      = None,
                        selfunc         = None,
                        n_draws_pars    = 1e3,
-                       n_draws_norm    = 1e5,
+                       n_draws_norm    = 1e4,
                        alpha0          = 1.,
                        gamma0          = None,
                        probit          = False,
@@ -306,15 +326,19 @@ class HMM:
                 if self.par_draws[i] is not None:
                     pars        = self.par_draws[i].T
                     i_p         = i + self.augment
-                    log_total_p = np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0)
+                    log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0))
                     vals        = np.exp(log_total_p - logsumexp_jit(log_total_p))
-                    par_vals.append(np.atleast_1d([np.random.choice(p, p = vals) for p in pars]))
+                    try:
+                        par_vals.append(np.atleast_1d([np.random.choice(p, p = vals) for p in pars]))
+                    except:
+                        print(self.evaluated_logL)
                 else:
                     par_vals.append([])
             par_models = [par_model(m.model, par, self.bounds, self.probit, self.selfunc) for m, par in zip(self.par_models, par_vals)]
+            if self.selfunc is not None:
+                [m._compute_normalisation([p], self.n_draws_norm) for m, p in zip(par_models, par_vals)]
         else:
             par_models = self.par_models
-        
         if self.augment:
             if self.nonpar.n_pts == 0:
                 models = [par_model(uniform, [1./self.volume], self.bounds, self.probit)] + par_models
@@ -323,7 +347,7 @@ class HMM:
                 models = [nonpar] + par_models
         else:
             models = par_models
-        return het_mixture(models, dirichlet(self.n_pts+self.gamma0).rvs()[0], self.bounds, self.augment)
+        return het_mixture(models, dirichlet(self.n_pts+self.gamma0).rvs()[0], self.bounds, self.augment, selfunc = self.selfunc)
         
 class HierHMM(HMM):
     """
