@@ -24,7 +24,7 @@ def get_weights(draws):
     Returns:
         :np.ndarray: samples
     """
-    return np.array([d.weights for d in draws])
+    return np.array([d.intrinsic_weights for d in draws])
 
 def get_samples_and_weights(draws):
     """
