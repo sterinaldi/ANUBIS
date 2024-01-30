@@ -1,6 +1,6 @@
 import numpy as np
-import warnings
 import dill
+from figaro.load import load_data as load_data_figaro, load_density as load_density_figaro
 from anubis.exceptions import ANUBISException
 from pathlib import Path
 
@@ -51,3 +51,31 @@ def _load_density_file(file):
         return draws
     except FileNotFoundError:
             raise ANUBISException("{0} not found. Please provide it or re-run the inference.".format(file.name))
+
+def load_data(path_samples, path_mixtures, *args, **kwargs):
+    """
+    Loads the data from .txt files (for simulations) or .h5/.hdf5/.dat files (posteriors from GWTC-x) along with their DPGMM reconstruction (must be available in advance).
+    Default cosmological parameters from Planck Collaboration (2021) in a flat Universe (https://www.aanda.org/articles/aa/pdf/2020/09/aa33910-18.pdf)
+    Not all GW parameters are implemented: run figaro.load.available_gw_pars() for a list of available parameters.
+    
+    Arguments:
+        str or Path path_samples:  folder with samples files
+        str or Path path_mixtures: folder with mixtures files
+        bool seed:                 fixes the seed to a default value (1) for reproducibility
+        list-of-str par:           list with parameter(s) to extract from GW posteriors
+        int n_samples:             number of samples for (random) downsampling. Default -1: all samples
+        double h:                  Hubble constant H0/100 [km/(s*Mpc)]
+        double om:                 matter density parameter
+        double ol:                 cosmological constant density parameter
+        str waveform:              waveform family to be used ('combined', 'seob', 'imr')
+        double snr_threhsold:      SNR threshold for event filtering. For injection analysis only.
+        double far_threshold:      FAR threshold for event filtering. For injection analysis only.
+        bool verbose:              show progress bar
+
+    Returns:
+        iterable:   iterable storing samples and reconstructions
+        np.ndarray: names
+    """
+    samples, names = load_data_figaro(path_samples, *args, **kwargs)
+    mixtures       = [load_density_figaro(Path(path_mixtures, ev+'.pkl')) for ev in names]
+    return [[ss, mm] for ss, mm in zip(samples, mixtures)], names
