@@ -73,7 +73,10 @@ class par_model:
     
     def pdf_pars(self, x, pars):
         if self.norm is not None:
-            return np.array([self._model(x, p)/n for p, n in zip(pars, self.norm)])
+            if hasattr(self.norm, '__iter__'):
+                return np.array([self._model(x, p)/n for p, n in zip(pars, self.norm)])
+            else:
+                return np.array([self._model(x, p)/self.norm for p in pars])
         else:
             return np.array([self._model(x, p) for p in pars])
     
@@ -331,7 +334,7 @@ class HMM:
         self.assignations[id] = None
         if self.augment and cid == 0:
             id_nonpar  = self.ids_nonpar[id]
-            self.nonpar._remove_from_cluster(x, self.nonpar.assignations[id_nonpar])
+            self.nonpar._remove_from_cluster(x, self.nonpar.assignations[id_nonpar], self.nonpar.evaluated_logL[id_nonpar])
         self._assign_to_component(x, id, id_nonpar = id_nonpar, reassign = True)
     
     def build_mixture(self):
@@ -392,14 +395,14 @@ class HierHMM(HMM):
                        gamma0          = None,
                        probit          = False,
                        augment         = True,
-                       n_reassignments = 0.,
+                       n_reassignments = None,
                        ):
         
         super().__init__(models          = models,
                          bounds          = bounds,
                          pars            = pars,
                          par_bounds      = par_bounds,
-                         prior_pars      = prior_pars,
+                         prior_pars      = None,
                          n_draws_pars    = n_draws_pars,
                          alpha0          = alpha0,
                          gamma0          = gamma0,
@@ -418,7 +421,7 @@ class HierHMM(HMM):
             self.components  = [self.nonpar] + self.par_models
         self.n_draws_evs = int(n_draws_evs)
         
-    def _log_predictive_likelihood(self, x, i):
+    def _log_predictive_likelihood(self, x, i, pt_id):
         if self.augment and i == 0:
             return self._log_predictive_mixture(x['mix']), np.zeros(self.n_draws_pars)
         else:
@@ -430,7 +433,7 @@ class HierHMM(HMM):
                 else:
                     i_p = i
                 if not pt_id in list(self.evaluated_logL.keys()):
-                    log_p = np.log(np.mean(self.components[i].pdf_pars(x['samples'], self.par_draws[i_p])), axis = 1).flatten()
+                    log_p = np.log(np.mean(self.components[i].pdf_pars(x['samples'], self.par_draws[i_p]), axis = 1)).flatten()
                 else:
                     log_p = self.evaluated_logL[pt_id][i]
                 log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0))
@@ -477,7 +480,7 @@ class HierHMM(HMM):
         if self.augment and id == 0:
             if id_nonpar is None:
                 self.ids_nonpar[int(pt_id)] = len(list(self.nonpar.stored_pts.keys()))
-                self.nonpar.add_new_point(x['mix'])
+                self.nonpar.add_new_point([x['mix']])
             else:
                 self._reassign_point_nonpar(x['mix'], id_nonpar)
         # Parameter estimation
