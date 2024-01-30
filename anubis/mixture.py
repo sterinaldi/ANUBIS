@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.stats import dirichlet
 
-from figaro.mixture import DPGMM, HDPGMM, _update_alpha
+from figaro.mixture import DPGMM, HDPGMM, mixture, _update_alpha
 from figaro.decorators import probit
 from figaro.utils import rejection_sampler
 from figaro._likelihood import evaluate_mixture_MC_draws, evaluate_mixture_MC_draws_1d
@@ -96,20 +96,21 @@ class het_mixture:
     Returns:
         :het_mixture: instance of het_mixture class
     """
-    def __init__(self, models, weights, bounds, augment, selfunc = None):
+    def __init__(self, models, weights, bounds, augment, selfunc = None, n_draws = 1e4):
         self.models  = models
         self.weights = weights
         self.bounds  = np.atleast_2d(bounds)
         self.dim     = len(self.bounds)
         self.augment = augment
         self.selfunc = selfunc
+        self.n_draws = int(n_draws)
         if self.selfunc is not None:
             self.intrinsic_weights = [wi*mi.norm for wi, mi in zip(self.weights[self.augment:], self.models[self.augment:])]
             if self.augment:
-                try:
-                    self.intrinsic_weights = [self.weights[0]*np.mean(1./self.selfunc(self.models[0].rvs(10000)))] + self.intrinsic_weights
-                except AttributeError:
-                    self.intrinsic_weights = [self.weights[0]*np.mean(1./self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (10000, len(self.bounds)))))] + self.intrinsic_weights
+                if isinstance(self.models[0], mixture):
+                    self.intrinsic_weights = [self.weights[0]*np.mean(1./self.selfunc(self.models[0].rvs(self.n_draws)))] + self.intrinsic_weights
+                else:
+                    self.intrinsic_weights = [self.weights[0]*np.mean(1./self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (self.n_draws, len(self.bounds)))))] + self.intrinsic_weights
             self.intrinsic_weights = np.array(self.intrinsic_weights/np.sum(self.intrinsic_weights))
             self.norm_intrinsic    = np.sum(self.intrinsic_weights[self.augment:])
         else:
@@ -124,9 +125,15 @@ class het_mixture:
     
     def pdf(self, x):
         return np.array([wi*mi.pdf(x) for wi, mi in zip(self.weights, self.models)]).sum(axis = 0)
+    
+    def logpdf(self, x):
+        return np.log(self.pdf(x))
 
     def pdf_intrinsic(self, x):
         return np.array([wi*mi.pdf_intrinsic(x)/self.norm_intrinsic for wi, mi in zip(self.intrinsic_weights[self.augment:], self.models[self.augment:])]).sum(axis = 0)
+    
+    def logpdf_intrinsic(self, x):
+        return np.log(self.pdf_intrinsic(x))
 
 #-----------------#
 # Inference class #
@@ -166,7 +173,7 @@ class HMM:
                        gamma0          = None,
                        probit          = False,
                        augment         = True,
-                       n_reassignments = 0.,
+                       n_reassignments = None,
                        ):
         # Settings
         self.bounds       = np.atleast_2d(bounds)
@@ -232,9 +239,9 @@ class HMM:
             [m._compute_normalisation(p, self.n_draws_norm) for m, p in zip(self.components[self.augment:], self.par_draws)]
         if self.augment:
             self.nonpar.initialise()
-            self.ids_DPGMM = {}
+            self.ids_nonpar = {}
 
-    def _assign_to_component(self, x, pt_id, id_DPGMM = None, reassign = False):
+    def _assign_to_component(self, x, pt_id, id_nonpar = None, reassign = False):
         scores             = np.zeros(self.n_components)
         vals               = np.zeros(shape = (self.n_components, self.n_draws_pars))
         for i in range(self.n_components):
@@ -246,18 +253,18 @@ class HMM:
         self.weights       = (self.n_pts + self.gamma0)/np.sum(self.n_pts + self.gamma0)
         # If DPGMM, updates mixture
         if self.augment and id == 0:
-            if id_DPGMM is None:
-                self.ids_DPGMM[int(pt_id)] = len(list(self.nonpar.stored_pts.keys()))
+            if id_nonpar is None:
+                self.ids_nonpar[int(pt_id)] = len(list(self.nonpar.stored_pts.keys()))
                 self.nonpar.add_new_point(x)
             else:
-                self._reassign_point_DPGMM(x, id_DPGMM)
+                self._reassign_point_nonpar(x, id_nonpar)
         # Parameter estimation
         elif self.par_bounds is not None:
             self.evaluated_logL[pt_id] = vals
         self.assignations[pt_id]       = int(id)
 
-    def _reassign_point_DPGMM(self, x, id_DPGMM):
-        self.nonpar._assign_to_cluster(x, id_DPGMM)
+    def _reassign_point_nonpar(self, x, id_nonpar):
+        self.nonpar._assign_to_cluster(x, id_nonpar)
         self.nonpar.alpha = _update_alpha(self.nonpar.alpha, self.nonpar.n_pts, (np.array(self.nonpar.N_list) > 0).sum(), self.nonpar.alpha_0)
 
     def _log_predictive_likelihood(self, x, i, pt_id):
@@ -300,10 +307,14 @@ class HMM:
     
     def density_from_samples(self, samples):
         np.random.shuffle(samples)
+        if self.n_reassignments is None:
+            n_reassignments = 5*len(samples)
+        else:
+            n_reassignments = self.n_reassignments
         for s in samples:
             self.add_new_point(s)
         # Random Gibbs walk (if required)
-        for id in np.random.choice(int(np.sum(self.n_pts)), size = self.n_reassignments, replace = True):
+        for id in np.random.choice(int(np.sum(self.n_pts)), size = n_reassignments, replace = True):
             self._reassign_point(int(id))
         # Reassign all points once
         for id in range(int(np.sum(self.n_pts))):
@@ -315,13 +326,13 @@ class HMM:
     def _reassign_point(self, id):
         x                     = self.stored_pts[id]
         cid                   = self.assignations[id]
-        id_DPGMM              = None
+        id_nonpar             = None
         self.n_pts[cid]      -= 1
         self.assignations[id] = None
         if self.augment and cid == 0:
-            id_DPGMM  = self.ids_DPGMM[id]
-            self.nonpar._remove_from_cluster(x, self.nonpar.assignations[id_DPGMM])
-        self._assign_to_component(x, id, id_DPGMM = id_DPGMM, reassign = True)
+            id_nonpar  = self.ids_nonpar[id]
+            self.nonpar._remove_from_cluster(x, self.nonpar.assignations[id_nonpar])
+        self._assign_to_component(x, id, id_nonpar = id_nonpar, reassign = True)
     
     def build_mixture(self):
         if self.par_bounds is not None:
@@ -409,21 +420,24 @@ class HierHMM(HMM):
         
     def _log_predictive_likelihood(self, x, i):
         if self.augment and i == 0:
-            return self._log_predictive_mixture(x), np.zeros(self.n_draws_pars)
+            return self._log_predictive_mixture(x['mix']), np.zeros(self.n_draws_pars)
         else:
-            samps = x.rvs(self.n_draws_evs)
             if self.par_bounds is None:
-                return np.log(np.mean(self.components[i].pdf(samps))), np.zeros(self.n_draws_pars)
+                return np.log(np.mean(self.components[i].pdf(x['samples']))), np.zeros(self.n_draws_pars)
             else:
                 if self.augment:
                     i_p = i-1
                 else:
                     i_p = i
-                log_p = np.log([np.mean(self.components[i].pdf_pars(samps, pars)) for pars in self.par_draws[i_p]]).flatten()
-                v     = logsumexp_jit(log_p + self.log_total_p[i_p]) - logsumexp_jit(self.log_total_p[i_p])
-                return v, log_p
+                if not pt_id in list(self.evaluated_logL.keys()):
+                    log_p = np.log(np.mean(self.components[i].pdf_pars(x['samples'], self.par_draws[i_p])), axis = 1).flatten()
+                else:
+                    log_p = self.evaluated_logL[pt_id][i]
+                log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0))
+                denom       = logsumexp_jit(log_total_p) - np.log(self.n_draws_pars)
+                v           = logsumexp_jit(log_p + log_total_p) - np.log(self.n_draws_pars)
+                return np.nan_to_num(v - denom, nan = -np.inf, neginf = -np.inf), log_p
 
-    @probit
     def _log_predictive_mixture(self, x):
         scores = np.zeros(self.nonpar.n_cl + 1)
         if self.dim == 1:
@@ -445,5 +459,28 @@ class HierHMM(HMM):
         return logsumexp_jit(scores)
     
     def add_new_point(self, ev):
-        x = np.random.choice(ev)
-        self._assign_to_component(x)
+        x = {'samples': ev[0], 'mix': np.random.choice(ev[1])}
+        self.stored_pts[int(np.sum(self.n_pts))] = x
+        self._assign_to_component(x, pt_id = int(np.sum(self.n_pts)))
+
+    def _assign_to_component(self, x, pt_id, id_nonpar = None, reassign = False):
+        scores             = np.zeros(self.n_components)
+        vals               = np.zeros(shape = (self.n_components, self.n_draws_pars))
+        for i in range(self.n_components):
+            score, vals[i] = self._log_predictive_likelihood(x, i, pt_id)
+            scores[i]      = score + np.log(self.gamma0[i] + self.n_pts[i])
+        scores             = np.exp(scores - logsumexp_jit(scores))
+        id                 = np.random.choice(self.n_components, p = scores)
+        self.n_pts[id]    += 1
+        self.weights       = (self.n_pts + self.gamma0)/np.sum(self.n_pts + self.gamma0)
+        # If DPGMM, updates mixture
+        if self.augment and id == 0:
+            if id_nonpar is None:
+                self.ids_nonpar[int(pt_id)] = len(list(self.nonpar.stored_pts.keys()))
+                self.nonpar.add_new_point(x['mix'])
+            else:
+                self._reassign_point_nonpar(x['mix'], id_nonpar)
+        # Parameter estimation
+        elif self.par_bounds is not None:
+            self.evaluated_logL[pt_id] = vals
+        self.assignations[pt_id]       = int(id)
