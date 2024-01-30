@@ -77,5 +77,5 @@ def load_data(path_samples, path_mixtures, *args, **kwargs):
         np.ndarray: names
     """
     samples, names = load_data_figaro(path_samples, *args, **kwargs)
-    mixtures       = [load_density_figaro(Path(path_mixtures, ev+'.pkl')) for ev in names]
+    mixtures       = [load_density_figaro(Path(path_mixtures, 'draws_'+ev+'.pkl')) for ev in names]
     return [[ss, mm] for ss, mm in zip(samples, mixtures)], names
