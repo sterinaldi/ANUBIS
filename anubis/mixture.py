@@ -52,22 +52,15 @@ class par_model:
         return self.pdf(x)
     
     def _compute_normalisation(self, pars, n_draws):
-        self.norm = None
-        volume    = np.prod(np.diff(self.bounds, axis = 1))
-        import matplotlib.pyplot as plt
-#        samples   = rejection_sampler(int(n_draws), self.selfunc, self.bounds)
-#        ss        = np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (n_draws, len(self.bounds)))
-#        sf_n      = np.mean(self.selfunc(ss)/volume)
-        x = np.linspace(self.bounds[0,0], self.bounds[0,1], 10000)
-        dx = x[1]-x[0]
+        self.norm     = None
+        volume        = np.prod(np.diff(self.bounds, axis = 1))
+        samples       = rejection_sampler(int(n_draws), self.selfunc, self.bounds)
+        self.sf_norm  = np.mean(self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (n_draws, len(self.bounds))))*volume)
         if pars is not None:
-#            self.norm = np.atleast_1d([np.sum(self.model(samples, p).flatten()*sf_n) for p in pars])
-            self.norm = np.atleast_1d([np.sum(self._model(x, p)*dx) for p in pars])
-#            plt.hist(nn, histtype = 'step', density = True)'
-#            plt.show()
-#            exit()
+            self.norm = np.atleast_1d([np.mean(self.model(samples, p).flatten()*self.sf_norm) for p in pars])
+            self.norm[self.norm == 0.] = np.inf
         else:
-            self.norm = np.atleast_1d(np.sum(self.pdf(samples)))
+            self.norm = np.atleast_1d(np.mean(self.pdf_intrinsic(samples))*self.sf_norm)
         if len(self.norm) == 1:
             self.norm = self.norm[0]
     
@@ -110,8 +103,19 @@ class het_mixture:
         self.dim     = len(self.bounds)
         self.augment = augment
         self.selfunc = selfunc
+        if self.selfunc is not None:
+            self.intrinsic_weights = [wi*mi.norm for wi, mi in zip(self.weights[self.augment:], self.models[self.augment:])]
+            if self.augment:
+                try:
+                    self.intrinsic_weights = [self.weights[0]*np.mean(1./self.selfunc(self.models[0].rvs(10000)))] + self.intrinsic_weights
+                except AttributeError:
+                    self.intrinsic_weights = [self.weights[0]*np.mean(1./self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (10000, len(self.bounds)))))] + self.intrinsic_weights
+            self.intrinsic_weights = np.array(self.intrinsic_weights/np.sum(self.intrinsic_weights))
+            self.norm_intrinsic    = np.sum(self.intrinsic_weights[self.augment:])
+        else:
+            self.intrinsic_weights = self.weights
         if self.augment:
-            self.probit = models[0].probit
+            self.probit = self.models[0].probit
         else:
             self.probit = False
     
@@ -122,7 +126,7 @@ class het_mixture:
         return np.array([wi*mi.pdf(x) for wi, mi in zip(self.weights, self.models)]).sum(axis = 0)
 
     def pdf_intrinsic(self, x):
-        return np.array([wi*mi.pdf_intrinsic(x) for wi, mi in zip(self.weights[self.augment:], self.models[self.augment:])]).sum(axis = 0)
+        return np.array([wi*mi.pdf_intrinsic(x)/self.norm_intrinsic for wi, mi in zip(self.intrinsic_weights[self.augment:], self.models[self.augment:])]).sum(axis = 0)
 
 #-----------------#
 # Inference class #
@@ -328,10 +332,7 @@ class HMM:
                     i_p         = i + self.augment
                     log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0))
                     vals        = np.exp(log_total_p - logsumexp_jit(log_total_p))
-                    try:
-                        par_vals.append(np.atleast_1d([np.random.choice(p, p = vals) for p in pars]))
-                    except:
-                        print(self.evaluated_logL)
+                    par_vals.append(np.atleast_1d([np.random.choice(p, p = vals) for p in pars]))
                 else:
                     par_vals.append([])
             par_models = [par_model(m.model, par, self.bounds, self.probit, self.selfunc) for m, par in zip(self.par_models, par_vals)]
