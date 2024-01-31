@@ -17,14 +17,14 @@ class par_model:
     Class to store a parametric model.
     
     Arguments:
-        :callable model:    model pdf
-        :iterable pars:     parameters of the model
-        :np.ndarray bounds: bounds (FIGARO)
-        :bool probit:       whether to use the probit transformation or not (FIGARO compatibility)
-        :callable selfunc:  selection function
+        callable model:    model pdf
+        iterable pars:     parameters of the model
+        np.ndarray bounds: bounds (FIGARO)
+        bool probit:       whether to use the probit transformation or not (FIGARO compatibility)
+        callable selfunc:  selection function
     
     Returns:
-        :par_model: instance of model class
+        par_model: instance of model class
     """
     def __init__(self, model,
                        pars,
