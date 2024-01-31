@@ -22,6 +22,7 @@ class par_model:
         np.ndarray bounds: bounds (FIGARO)
         bool probit:       whether to use the probit transformation or not (FIGARO compatibility)
         callable selfunc:  selection function
+        float norm:        normalisation constant for the observed distribution
     
     Returns:
         par_model: instance of model class
@@ -31,14 +32,18 @@ class par_model:
                        bounds,
                        probit,
                        selfunc = None,
+                       norm = None,
                        ):
-        self.model   = model
-        self.pars    = pars
-        self.bounds  = np.atleast_2d(bounds)
-        self.dim     = len(self.bounds)
-        self.probit  = probit
-        self.selfunc = selfunc
-        self.norm    = 1.
+        self.model    = model
+        self.pars     = pars
+        self.bounds   = np.atleast_2d(bounds)
+        self.dim      = len(self.bounds)
+        self.probit   = probit
+        self.selfunc  = selfunc
+        if norm is not None:
+            self.norm = norm
+        else:
+            self.norm = 1.
     
     def _selfunc(func):
         """
@@ -239,19 +244,20 @@ class HMM:
     Class to infer a distribution given a set of samples.
     
     Arguments:
-        list-of-callbles:    models
+        list-of-callables:   models
         iterable bounds:     boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
         iterable pars:       fixed parameters of the parametric model(s)
         iterable prior_pars: NIW prior parameters (k, L, nu, mu)
         iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
         callable selfunc:    selection function (if required)
         double n_draws_pars: number of draws for MC integral over parameters
-        double n_draws_pars: number of draws for normalisation MC integral over parameters
+        double n_draws_norm: number of draws for normalisation MC integral over parameters
         double alpha0:       initial guess for concentration parameter
         np.ndarray gamma0:   Dirichlet Distribution prior
         bool probit:         whether to use the probit transformation for the DPGMM
         bool augment:        whether to include the non-parametric channel
         int n_reassignments: number of reassignments
+        np.ndarray norm:     normalisation constant for the parametric observed distributions. Use None if not available
     
     Returns:
         HMM: instance of HMM class
@@ -269,6 +275,7 @@ class HMM:
                        probit          = False,
                        augment         = True,
                        n_reassignments = None,
+                       norm            = None,
                        ):
         # Settings
         self.bounds       = np.atleast_2d(bounds)
@@ -287,7 +294,11 @@ class HMM:
             self.par_bounds = None
         if self.selfunc is not None:
             self.n_draws_norm = int(n_draws_norm)
-        self.par_models = [par_model(mod, p, bounds, probit, selfunc) for mod, p in zip(models, pars)]
+        if norm is None:
+            self.norm   = [None for _ in models]
+        else:
+            self.norm   = norm
+        self.par_models = [par_model(mod, p, bounds, probit, selfunc, norm = n) for mod, p, n in zip(models, pars, self.norm)]
         # DPGMM initialisation (if required)
         if self.augment:
             self.nonpar = DPGMM(bounds     = bounds,
@@ -346,7 +357,7 @@ class HMM:
             self.par_draws      = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws_pars, len(b))) if b is not None else None for b in self.par_bounds]
             self.log_total_p    = np.array([np.zeros(self.n_draws_pars) for _ in range(len(self.par_models))])
         if self.selfunc is not None:
-            [m._compute_normalisation(p, self.n_draws_norm) for m, p in zip(self.components[self.augment:], self.par_draws)]
+            [m._compute_normalisation(p, self.n_draws_norm) for m, p, n in zip(self.components[self.augment:], self.par_draws, self.norm) if n is None]
         if self.augment:
             self.nonpar.initialise(prior_pars = prior_pars)
             self.ids_nonpar = {}
@@ -441,9 +452,10 @@ class HMM:
         for j, i in enumerate(list(np.arange(self.nonpar.n_cl)) + ["new"]):
             if i == "new":
                 ss = None
+                scores[j] = -np.log(self.volume)
             else:
                 ss = self.nonpar.mixture[i]
-            scores[j] = self.nonpar._log_predictive_likelihood(x, ss)
+                scores[j] = self.nonpar._log_predictive_likelihood(x, ss)
             if ss is None:
                 scores[j] += np.log(self.nonpar.alpha) - np.log(self.nonpar.n_pts + self.nonpar.alpha)
             elif ss.N < 1:
@@ -503,7 +515,7 @@ class HMM:
         self.assignations[id] = None
         if self.augment and cid == 0:
             id_nonpar  = self.ids_nonpar[id]
-            self.nonpar._remove_from_cluster(x, self.nonpar.assignations[id_nonpar], self.nonpar.evaluated_logL[id_nonpar])
+            self.nonpar._remove_from_cluster(x, self.nonpar.assignations[id_nonpar])
         self._assign_to_component(x, id, id_nonpar = id_nonpar, reassign = True)
     
     def build_mixture(self):
@@ -524,9 +536,9 @@ class HMM:
                     par_vals.append(np.atleast_1d([np.random.choice(p, p = vals) for p in pars]))
                 else:
                     par_vals.append([])
-            par_models = [par_model(m.model, par, self.bounds, self.probit, self.selfunc) for m, par in zip(self.par_models, par_vals)]
+            par_models = [par_model(m.model, par, self.bounds, self.probit, self.selfunc, norm = n) for m, par, n in zip(self.par_models, par_vals, self.norm)]
             if self.selfunc is not None:
-                [m._compute_normalisation([p], self.n_draws_norm) for m, p in zip(par_models, par_vals)]
+                [m._compute_normalisation([p], self.n_draws_norm) for m, p, n in zip(par_models, par_vals, self.norm) if n is None]
         else:
             par_models = self.par_models
         if self.augment:
@@ -545,19 +557,19 @@ class HierHMM(HMM):
     Child of HMM class.
     
     Arguments:
-        list-of-callbles:    models
+        list-of-callables:   models
         iterable bounds:     boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
         iterable pars:       fixed parameters of the parametric model(s)
         iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
         iterable prior_pars: IW parameters for (H)DPGMM
         double n_draws_pars: number of draws for MC integral over parameters
-        double n_draws_evs:  number of draws for MC integral over events
         doubne MC_draws:     number of draws for MC integral for (H)DPGMM
         double alpha0:       initial guess for concentration parameter
         np.ndarray gamma0:   Dirichlet Distribution prior
         bool probit:         whether to use the probit transformation for the (H)DPGMM
         bool augment:        whether to include the non-parametric channel
         int n_reassignments: number of reassignments. Default is reassign 5 times the number of available samples
+        np.ndarray norm:     normalisation constant for the parametric observed distributions. Use None if not available
     
     Returns:
         HierHMM: instance of HierHMM class
@@ -568,13 +580,13 @@ class HierHMM(HMM):
                        par_bounds      = None,
                        prior_pars      = None,
                        n_draws_pars    = 1e3,
-                       n_draws_evs     = 1e3,
                        MC_draws        = None,
                        alpha0          = 1.,
                        gamma0          = None,
                        probit          = False,
                        augment         = True,
                        n_reassignments = None,
+                       norm            = None,
                        ):
         # Initialise the parent class
         super().__init__(models          = models,
@@ -588,6 +600,7 @@ class HierHMM(HMM):
                          probit          = probit,
                          augment         = augment,
                          n_reassignments = n_reassignments,
+                         norm            = norm,
                          )
         # (H)DPGMM initialisation (if required)
         if self.augment:
@@ -598,7 +611,6 @@ class HierHMM(HMM):
                                       MC_draws   = MC_draws,
                                       )
             self.components  = [self.nonpar] + self.par_models
-        self.n_draws_evs = int(n_draws_evs)
         
     def _log_predictive_likelihood(self, x, i, pt_id):
         """
@@ -703,3 +715,20 @@ class HierHMM(HMM):
         elif self.par_bounds is not None:
             self.evaluated_logL[pt_id] = vals
         self.assignations[pt_id]       = int(id)
+    
+    def _reassign_point(self, id):
+        """
+        Update the probability density reconstruction reassigining an existing sample
+        
+        Arguments:
+            id: sample id
+        """
+        x                     = self.stored_pts[id]
+        cid                   = self.assignations[id]
+        id_nonpar             = None
+        self.n_pts[cid]      -= 1
+        self.assignations[id] = None
+        if self.augment and cid == 0:
+            id_nonpar  = self.ids_nonpar[id]
+            self.nonpar._remove_from_cluster(x, self.nonpar.assignations[id_nonpar], self.nonpar.evaluated_logL[id_nonpar])
+        self._assign_to_component(x, id, id_nonpar = id_nonpar, reassign = True)
