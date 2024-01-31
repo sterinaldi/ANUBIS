@@ -41,6 +41,9 @@ class par_model:
         self.norm    = 1.
     
     def _selfunc(func):
+        """
+        Applies the selection function to to the intrinsic distribution.
+        """
         def observed_model(self, x, *args):
             if self.selfunc is not None:
                 return func(self, x, *args)*self.selfunc(x)
@@ -52,6 +55,13 @@ class par_model:
         return self.pdf(x)
     
     def _compute_normalisation(self, pars, n_draws):
+        """
+        Computes the normalisation of the product p_intr(x|lambda)p_det(x) via monte carlo approximation
+        
+        Arguments:
+            np.ndarray pars: parameters of the distribution
+            int n_draws:     number of draws for the MC integral
+        """
         self.norm     = None
         volume        = np.prod(np.diff(self.bounds, axis = 1))
         samples       = rejection_sampler(int(n_draws), self.selfunc, self.bounds)
@@ -66,12 +76,40 @@ class par_model:
     
     @_selfunc
     def pdf(self, x):
+        """
+        pdf of the observed distribution
+        
+        Arguments:
+            np.ndarray x: point to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: p_intr.pdf(x)*p_obs(x)/norm
+        """
         return self.model(x, *self.pars)/self.norm
     
     def pdf_intrinsic(self, x):
+        """
+        pdf of the intrinsic distribution
+        
+        Arguments:
+            np.ndarray x: point to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: p_intr.pdf(x)
+        """
         return self.model(x, *self.pars)
     
     def pdf_pars(self, x, pars):
+        """
+        Observed pdf with different realisations of the parameters theta.
+        
+        Arguments:
+            np.ndarray x:    point to evaluate the mixture at
+            np.ndarray pars: array of parameters
+        
+        Returns:
+            np.ndarray: p_intr.pdf(x|theta)*p_obs(x)/norm
+        """
         if self.norm is not None:
             if hasattr(self.norm, '__iter__'):
                 return np.array([self._model(x, p)/n for p, n in zip(pars, self.norm)])
@@ -82,6 +120,16 @@ class par_model:
     
     @_selfunc
     def _model(self, x, pars):
+        """
+        Decorated intrinsic distribution with explicit dependence of parameters theta
+        
+        Arguments:
+            np.ndarray x:    point to evaluate the mixture at
+            np.ndarray pars: array of parameters
+        
+        Returns:
+            np.ndarray: p_intr.pdf(x|theta)*p_obs(x)/norm
+        """
         return self.model(x, *pars).flatten()
 
 class het_mixture:
@@ -89,17 +137,24 @@ class het_mixture:
     Class to store a single draw from HMM.
     
     Arguments:
-        :list-of-callables models: models in the mixture
-        :iterable pars:            list of model parameters. Must be formatted as [[p1, p2, ...], [q1, q2, ...], ...]. Add empty list for no parameters.
-        :np.ndarray:               weights
-        :np.ndarray bounds:        bounds (FIGARO)
-        :bool augment:             whether the model includes a non-parametric augmentation
-        :callable selfunc:         selection function
+        list-of-callables models: models in the mixture
+        np.ndarray:               weights
+        np.ndarray bounds:        bounds (FIGARO)
+        bool augment:             whether the model includes a non-parametric augmentation
+        callable selfunc:         selection function
+        int n_draws:              number of draws for normalisation
         
     Returns:
-        :het_mixture: instance of het_mixture class
+        het_mixture: instance of het_mixture class
     """
-    def __init__(self, models, weights, bounds, augment, selfunc = None, n_draws = 1e4):
+    def __init__(self, models,
+                       weights,
+                       bounds,
+                       augment,
+                       selfunc = None,
+                       n_draws = 1e4,
+                       ):
+        # Components
         self.models  = models
         self.weights = weights
         self.bounds  = np.atleast_2d(bounds)
@@ -107,6 +162,7 @@ class het_mixture:
         self.augment = augment
         self.selfunc = selfunc
         self.n_draws = int(n_draws)
+        # Weights and normalisation
         if self.selfunc is not None:
             self.intrinsic_weights = [wi*mi.norm for wi, mi in zip(self.weights[self.augment:], self.models[self.augment:])]
             if self.augment:
@@ -127,15 +183,51 @@ class het_mixture:
         return self.pdf(x)
     
     def pdf(self, x):
+        """
+        Evaluate mixture at point(s) x (observed)
+        
+        Arguments:
+            np.ndarray x: point(s) to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: het_mixture.pdf(x)
+        """
         return np.array([wi*mi.pdf(x) for wi, mi in zip(self.weights, self.models)]).sum(axis = 0)
     
     def logpdf(self, x):
+        """
+        Evaluate log mixture at point(s) x (observed)
+        
+        Arguments:
+            np.ndarray x: point(s) to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: het_mixture.logpdf(x)
+        """
         return np.log(self.pdf(x))
 
     def pdf_intrinsic(self, x):
+        """
+        Evaluate mixture at point(s) x (intrinsic)
+        
+        Arguments:
+            np.ndarray x: point(s) to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: het_mixture.pdf(x)
+        """
         return np.array([wi*mi.pdf_intrinsic(x)/self.norm_intrinsic for wi, mi in zip(self.intrinsic_weights[self.augment:], self.models[self.augment:])]).sum(axis = 0)
     
     def logpdf_intrinsic(self, x):
+        """
+        Evaluate log mixture at point(s) x (intrinsic)
+        
+        Arguments:
+            np.ndarray x: point(s) to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: het_mixture.logpdf(x)
+        """
         return np.log(self.pdf_intrinsic(x))
 
 #-----------------#
@@ -147,22 +239,22 @@ class HMM:
     Class to infer a distribution given a set of samples.
     
     Arguments:
-        :list-of-callbles:    models
-        :iterable bounds:     boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
-        :iterable pars:       fixed parameters of the parametric model(s)
-        :iterable prior_pars: NIW prior parameters (k, L, nu, mu)
-        :iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
-        :callable selfunc:    selection function (if required)
-        :double n_draws_pars: number of draws for MC integral over parameters
-        :double n_draws_pars: number of draws for normalisation MC integral over parameters
-        :double alpha0:       initial guess for concentration parameter
-        :np.ndarray gamma0:   Dirichlet Distribution prior
-        :bool probit:         whether to use the probit transformation for the DPGMM
-        :bool augment:        whether to include the non-parametric channel
-        :int n_reassignments: number of reassignments
+        list-of-callbles:    models
+        iterable bounds:     boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
+        iterable pars:       fixed parameters of the parametric model(s)
+        iterable prior_pars: NIW prior parameters (k, L, nu, mu)
+        iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
+        callable selfunc:    selection function (if required)
+        double n_draws_pars: number of draws for MC integral over parameters
+        double n_draws_pars: number of draws for normalisation MC integral over parameters
+        double alpha0:       initial guess for concentration parameter
+        np.ndarray gamma0:   Dirichlet Distribution prior
+        bool probit:         whether to use the probit transformation for the DPGMM
+        bool augment:        whether to include the non-parametric channel
+        int n_reassignments: number of reassignments
     
     Returns:
-        :HMM: instance of HMM class
+        HMM: instance of HMM class
     """
     def __init__(self, models,
                        bounds,
@@ -224,12 +316,27 @@ class HMM:
         self.initialise()
     
     def pdf(self, x):
+        """
+        Evaluate mixture at point(s) x
+        
+        Arguments:
+            np.ndarray x: point(s) to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: mixture.pdf(x)
+        """
         return np.array([wi*mi.pdf(x) for wi, mi in zip(self.weights, self.models)]).sum(axis = 0)
     
     def __call__(self, x):
         return self.pdf(x)
     
-    def initialise(self):
+    def initialise(self, prior_pars = None):
+        """
+        Initialise the mixture to initial conditions.
+
+        Arguments:
+            iterable prior_pars: NIW prior parameters (k, L, nu, mu) for the DPGMM. If None, old parameters are kept
+        """
         self.n_pts        = np.zeros(self.n_components)
         self.weights      = self.gamma0/np.sum(self.gamma0)
         self.stored_pts   = {}
@@ -241,10 +348,19 @@ class HMM:
         if self.selfunc is not None:
             [m._compute_normalisation(p, self.n_draws_norm) for m, p in zip(self.components[self.augment:], self.par_draws)]
         if self.augment:
-            self.nonpar.initialise()
+            self.nonpar.initialise(prior_pars = prior_pars)
             self.ids_nonpar = {}
 
     def _assign_to_component(self, x, pt_id, id_nonpar = None, reassign = False):
+        """
+        Assign the sample x to an existing cluster or to a new cluster according to the marginal distribution of cluster assignment.
+        
+        Arguments:
+            np.ndarray x:  sample
+            int pt_id:     point id
+            int id_nonpar: FIGARO id for the point
+            bool reassign: wheter the point is new or is being reassigned
+        """
         scores             = np.zeros(self.n_components)
         vals               = np.zeros(shape = (self.n_components, self.n_draws_pars))
         for i in range(self.n_components):
@@ -267,15 +383,38 @@ class HMM:
         self.assignations[pt_id]       = int(id)
 
     def _reassign_point_nonpar(self, x, id_nonpar):
+        """
+        Update the probability density reconstruction reassigining an existing sample
+        
+        Arguments:
+            id:        sample id
+            id_nonpar: FIGARO id for the point
+        """
         self.nonpar._assign_to_cluster(x, id_nonpar)
         self.nonpar.alpha = _update_alpha(self.nonpar.alpha, self.nonpar.n_pts, (np.array(self.nonpar.N_list) > 0).sum(), self.nonpar.alpha_0)
 
     def _log_predictive_likelihood(self, x, i, pt_id):
+        """
+        Compute log likelihood of drawing sample x from component i given the samples that are already assigned to that component marginalised over the component parameters.
+        
+        Arguments:
+            np.ndarray x: sample
+            int i:        component id
+            pt_id:        ANUBIS point ID
+        
+        Returns:
+            double:     marginal log Likelihood
+            np.ndarray: individual log Likelihood values for theta_i
+        """
+        # Non-parametric
         if self.augment and i == 0:
             return self._log_predictive_mixture(x), np.zeros(self.n_draws_pars)
+        # Parametric
         else:
+            # Fixed parameters or parameterless model
             if self.par_bounds is None or self.par_bounds[i - self.augment] is None:
                 return np.log(self.components[i].pdf(x)), np.zeros(self.n_draws_pars)
+            # Marginalisation over parameters
             else:
                 i_p = i - self.augment
                 if not pt_id in list(self.evaluated_logL.keys()):
@@ -289,6 +428,15 @@ class HMM:
     
     @probit
     def _log_predictive_mixture(self, x):
+        """
+        Compute log likelihood for non-parametric mixture (mixture of predictive likelihood)
+        
+        Arguments:
+            np.ndarray x: sample
+        
+        Returns:
+            double: log Likelihood
+        """
         scores = np.zeros(self.nonpar.n_cl + 1)
         for j, i in enumerate(list(np.arange(self.nonpar.n_cl)) + ["new"]):
             if i == "new":
@@ -304,11 +452,26 @@ class HMM:
                 scores[j] += np.log(ss.N) - np.log(self.nonpar.n_pts + self.nonpar.alpha)
         return logsumexp_jit(scores)
     
-    def add_new_point(self, x, pt_id = None):
+    def add_new_point(self, x):
+        """
+        Update the probability density reconstruction adding a new sample
+        
+        Arguments:
+            np.ndarray x: sample
+        """
         self.stored_pts[int(np.sum(self.n_pts))] = np.atleast_2d(x)
         self._assign_to_component(np.atleast_2d(x), pt_id = int(np.sum(self.n_pts)))
     
     def density_from_samples(self, samples):
+        """
+        Reconstruct the probability density from a set of samples.
+        
+        Arguments:
+            iterable samples: samples set
+        
+        Returns:
+            het_mixture: the inferred mixture
+        """
         np.random.shuffle(samples)
         if self.n_reassignments is None:
             n_reassignments = 5*len(samples)
@@ -327,6 +490,12 @@ class HMM:
         return d
     
     def _reassign_point(self, id):
+        """
+        Update the probability density reconstruction reassigining an existing sample
+        
+        Arguments:
+            id: sample id
+        """
         x                     = self.stored_pts[id]
         cid                   = self.assignations[id]
         id_nonpar             = None
@@ -338,6 +507,12 @@ class HMM:
         self._assign_to_component(x, id, id_nonpar = id_nonpar, reassign = True)
     
     def build_mixture(self):
+        """
+        Instances a mixture class representing the inferred distribution
+        
+        Returns:
+            het_mixture: the inferred distribution
+        """
         if self.par_bounds is not None:
             par_vals = []
             for i in range(len(self.par_models)):
@@ -370,18 +545,22 @@ class HierHMM(HMM):
     Child of HMM class.
     
     Arguments:
-        :list-of-callbles:    models
-        :iterable bounds:     boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
-        :iterable prior_pars: NIW prior parameters (k, L, nu, mu)
-        :iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
-        :double n_draws_pars: number of draws for MC integral over parameters
-        :double n_draws_evs:  number of draws for MC integral over events
-        :doubne MC_draws:     number of draws for MC integral for (H)DPGMM
-        :double alpha0:       initial guess for concentration parameter
-        :np.ndarray gamma0:   Dirichlet Distribution prior
+        list-of-callbles:    models
+        iterable bounds:     boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
+        iterable pars:       fixed parameters of the parametric model(s)
+        iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
+        iterable prior_pars: IW parameters for (H)DPGMM
+        double n_draws_pars: number of draws for MC integral over parameters
+        double n_draws_evs:  number of draws for MC integral over events
+        doubne MC_draws:     number of draws for MC integral for (H)DPGMM
+        double alpha0:       initial guess for concentration parameter
+        np.ndarray gamma0:   Dirichlet Distribution prior
+        bool probit:         whether to use the probit transformation for the (H)DPGMM
+        bool augment:        whether to include the non-parametric channel
+        int n_reassignments: number of reassignments. Default is reassign 5 times the number of available samples
     
     Returns:
-        :HierHMM: instance of HierHMM class
+        HierHMM: instance of HierHMM class
     """
     def __init__(self, models,
                        bounds,
@@ -397,7 +576,7 @@ class HierHMM(HMM):
                        augment         = True,
                        n_reassignments = None,
                        ):
-        
+        # Initialise the parent class
         super().__init__(models          = models,
                          bounds          = bounds,
                          pars            = pars,
@@ -422,16 +601,29 @@ class HierHMM(HMM):
         self.n_draws_evs = int(n_draws_evs)
         
     def _log_predictive_likelihood(self, x, i, pt_id):
+        """
+        Compute log likelihood of drawing the event x from component i given the events that are already assigned to that component marginalised over the component parameters.
+        
+        Arguments:
+            dict x: event
+            int i:  component id
+            pt_id:  ANUBIS point ID
+        
+        Returns:
+            double:     marginal log Likelihood
+            np.ndarray: individual log Likelihood values for theta_i
+        """
+        # Non-parametric
         if self.augment and i == 0:
             return self._log_predictive_mixture(x['mix']), np.zeros(self.n_draws_pars)
+        # Parametric
         else:
-            if self.par_bounds is None:
+            # Fixed parameters or parameter-less model
+            if self.par_bounds is None or self.par_bounds[i - self.augment] is None:
                 return np.log(np.mean(self.components[i].pdf(x['samples']))), np.zeros(self.n_draws_pars)
+            # Marginalisation over parameters
             else:
-                if self.augment:
-                    i_p = i-1
-                else:
-                    i_p = i
+                i_p = i - self.augment
                 if not pt_id in list(self.evaluated_logL.keys()):
                     log_p = np.log(np.mean(self.components[i].pdf_pars(x['samples'], self.par_draws[i_p]), axis = 1)).flatten()
                 else:
@@ -442,6 +634,15 @@ class HierHMM(HMM):
                 return np.nan_to_num(v - denom, nan = -np.inf, neginf = -np.inf), log_p
 
     def _log_predictive_mixture(self, x):
+        """
+        Compute log likelihood for non-parametric mixture (mixture of predictive likelihood)
+        
+        Arguments:
+            dict x: event
+        
+        Returns:
+            double: log Likelihood
+        """
         scores = np.zeros(self.nonpar.n_cl + 1)
         if self.dim == 1:
             logL_x = evaluate_mixture_MC_draws_1d(self.nonpar.mu_MC, self.nonpar.sigma_MC, x.means, x.covs, x.w)
@@ -462,11 +663,26 @@ class HierHMM(HMM):
         return logsumexp_jit(scores)
     
     def add_new_point(self, ev):
+        """
+        Update the probability density reconstruction adding a new event
+        
+        Arguments:
+            np.ndarray ev: event
+        """
         x = {'samples': ev[0], 'mix': np.random.choice(ev[1])}
         self.stored_pts[int(np.sum(self.n_pts))] = x
         self._assign_to_component(x, pt_id = int(np.sum(self.n_pts)))
 
     def _assign_to_component(self, x, pt_id, id_nonpar = None, reassign = False):
+        """
+        Assign the event x to an existing cluster or to a new cluster according to the marginal distribution of cluster assignment.
+        
+        Arguments:
+            dict x:        event
+            int pt_id:     point id
+            int id_nonpar: FIGARO id for the point
+            bool reassign: wheter the point is new or is being reassigned
+        """
         scores             = np.zeros(self.n_components)
         vals               = np.zeros(shape = (self.n_components, self.n_draws_pars))
         for i in range(self.n_components):

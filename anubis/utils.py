@@ -16,7 +16,7 @@ def get_samples(draws):
 
 def get_weights(draws):
     """
-    Extract weight samples from a list of draws.
+    Extract (intrinsic) weight samples from a list of draws.
     
     Arguments:
         :iterable draws: instances of het_mixture class
@@ -28,7 +28,7 @@ def get_weights(draws):
 
 def get_samples_and_weights(draws):
     """
-    Extract parameter and weight samples from a list of draws.
+    Extract parameter and (intrinsic) weight samples from a list of draws.
     
     Arguments:
         :iterable draws: instances of het_mixture class

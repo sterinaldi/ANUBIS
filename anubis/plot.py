@@ -10,20 +10,25 @@ from figaro.plot import plot_1d_dist as figaro_plot_1d_dist
 from figaro.plot import plot_multidim
 
 from anubis.utils import get_samples, get_weights, get_samples_and_weights
-from anubis.exceptions import ANUBISException
+from anubis.exceptions import ANUBISException, import_doc
 
 plot_keys = ['pars', 'weights', 'joint', 'all']
 
 def _add_label_to_kwargs(d):
+    """
+    
+    """
     if not 'median_label' in d.keys():
         d['median_label'] = '\mathrm{HMM}'
     return d
     
 # Wrappers for FIGARO functions with different default labels
+@import_doc(figaro_plot_median_cr)
 def plot_median_cr(*args, **kwargs):
     _add_label_to_kwargs(kwargs)
     figaro_plot_median_cr(*args, **kwargs)
-    
+
+@import_doc(figaro_plot_1d_dist)
 def plot_1d_dist(*args, **kwargs):
     _add_label_to_kwargs(kwargs)
     figaro_plot_1d_dist(*args, **kwargs)

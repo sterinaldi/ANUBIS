@@ -6,7 +6,7 @@ from pathlib import Path
 
 def save_density(draws, folder = '.', name = 'density'):
     """
-    Exports a list of figaro.mixture instances to file
+    Exports a list of anubis.het_mixture instances to file
 
     Arguments:
         :list draws:         list of mixtures to be saved
