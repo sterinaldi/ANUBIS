@@ -15,9 +15,6 @@ from anubis.exceptions import ANUBISException, import_doc
 plot_keys = ['pars', 'weights', 'joint', 'all']
 
 def _add_label_to_kwargs(d):
-    """
-    
-    """
     if not 'median_label' in d.keys():
         d['median_label'] = '\mathrm{HMM}'
     return d
@@ -86,8 +83,7 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
     
     x    = np.linspace(x_min, x_max, n_pts)
     dx   = x[1]-x[0]
-    probs = np.array([np.sum([d.weights[i+d.augment]*model.pdf_intrinsic(x) for i, model in enumerate(d.models[d.augment:])], axis = 0) for d in draws])
-    probs = np.array([p/np.sum(p*dx) for p in probs])
+    probs = np.array([d.pdf_intrinsic(x) for d in draws])
     
     figaro_plot_1d_dist(x                = x,
                         draws            = probs,
@@ -109,8 +105,11 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
                         )
     
     if sel_eff and selfunc is not None:
-        observed  = injected(x)*selfunc(x)
-        observed /= np.sum(observed*dx)
+        if injected is not None:
+            observed  = injected(x)*selfunc(x)
+            observed /= np.sum(observed*dx)
+        else:
+            observed = None
         probs = np.array([np.sum([d.weights[i+d.augment]*model.pdf(x) for i, model in enumerate(d.models[d.augment:])], axis = 0) for d in draws])
         probs = np.array([p/np.sum(p*dx) for p in probs])
         figaro_plot_1d_dist(x            = x,
