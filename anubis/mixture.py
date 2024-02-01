@@ -72,7 +72,7 @@ class par_model:
         samples       = rejection_sampler(int(n_draws), self.selfunc, self.bounds)
         self.sf_norm  = np.mean(self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (n_draws, len(self.bounds))))*volume)
         if pars is not None:
-            self.norm = np.atleast_1d([np.mean(self.model(samples, p).flatten()*self.sf_norm) for p in pars])
+            self.norm = np.atleast_1d([np.mean(self.model(samples, *p).flatten()*self.sf_norm) for p in pars])
             self.norm[self.norm == 0.] = np.inf
         else:
             self.norm = np.atleast_1d(np.mean(self.pdf_intrinsic(samples))*self.sf_norm)
@@ -135,7 +135,7 @@ class par_model:
         Returns:
             np.ndarray: p_intr.pdf(x|theta)*p_obs(x)/norm
         """
-        return self.model(x, *pars).flatten()
+        return self.model(x.flatten(), *pars).flatten()
 
 class het_mixture:
     """
@@ -359,7 +359,7 @@ class HMM:
         if self.selfunc is not None:
             [m._compute_normalisation(p, self.n_draws_norm) for m, p, n in zip(self.components[self.augment:], self.par_draws, self.norm) if n is None]
         if self.augment:
-            self.nonpar.initialise(prior_pars = prior_pars)
+            self.nonpar.initialise()
             self.ids_nonpar = {}
 
     def _assign_to_component(self, x, pt_id, id_nonpar = None, reassign = False):
@@ -562,6 +562,7 @@ class HierHMM(HMM):
         iterable pars:       fixed parameters of the parametric model(s)
         iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
         iterable prior_pars: IW parameters for (H)DPGMM
+        callable selfunc:    selection function (if required)
         double n_draws_pars: number of draws for MC integral over parameters
         doubne MC_draws:     number of draws for MC integral for (H)DPGMM
         double alpha0:       initial guess for concentration parameter
@@ -579,6 +580,7 @@ class HierHMM(HMM):
                        pars            = None,
                        par_bounds      = None,
                        prior_pars      = None,
+                       selfunc         = None,
                        n_draws_pars    = 1e3,
                        MC_draws        = None,
                        alpha0          = 1.,
@@ -594,6 +596,7 @@ class HierHMM(HMM):
                          pars            = pars,
                          par_bounds      = par_bounds,
                          prior_pars      = None,
+                         selfunc         = selfunc,
                          n_draws_pars    = n_draws_pars,
                          alpha0          = alpha0,
                          gamma0          = gamma0,
@@ -627,7 +630,7 @@ class HierHMM(HMM):
         """
         # Non-parametric
         if self.augment and i == 0:
-            return self._log_predictive_mixture(x['mix']), np.zeros(self.n_draws_pars)
+            return self._log_predictive_mixture(x), np.zeros(self.n_draws_pars)
         # Parametric
         else:
             # Fixed parameters or parameter-less model
@@ -636,16 +639,26 @@ class HierHMM(HMM):
             # Marginalisation over parameters
             else:
                 i_p = i - self.augment
+                if self.selfunc is not None:
+                    sf = x['selfunc']
+                else:
+                    sf = 1.
                 if not pt_id in list(self.evaluated_logL.keys()):
-                    log_p = np.log(np.mean(self.components[i].pdf_pars(x['samples'], self.par_draws[i_p]), axis = 1)).flatten()
+                    log_p = np.zeros(len(self.par_draws[i_p]))
+                    if hasattr(self.components[i].norm, '__iter__'):
+                        for j, (p, n) in enumerate(zip(self.par_draws[i_p], self.components[i].norm)):
+                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p).flatten()*sf/n))
+                    else:
+                        for j, p in enumerate(self.par_draws[i_p]):
+                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p).flatten()*sf/self.components[i].norm))
                 else:
                     log_p = self.evaluated_logL[pt_id][i]
                 log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0))
-                denom       = logsumexp_jit(log_total_p) - np.log(self.n_draws_pars)
-                v           = logsumexp_jit(log_p + log_total_p) - np.log(self.n_draws_pars)
+                denom       = logsumexp_jit(log_total_p)
+                v           = logsumexp_jit(log_p + log_total_p)
                 return np.nan_to_num(v - denom, nan = -np.inf, neginf = -np.inf), log_p
 
-    def _log_predictive_mixture(self, x):
+    def _log_predictive_mixture(self, x, logL_x = None):
         """
         Compute log likelihood for non-parametric mixture (mixture of predictive likelihood)
         
@@ -656,10 +669,14 @@ class HierHMM(HMM):
             double: log Likelihood
         """
         scores = np.zeros(self.nonpar.n_cl + 1)
-        if self.dim == 1:
-            logL_x = evaluate_mixture_MC_draws_1d(self.nonpar.mu_MC, self.nonpar.sigma_MC, x.means, x.covs, x.w)
+        if x['logL_x'] is None:
+            if self.dim == 1:
+                logL_x = evaluate_mixture_MC_draws_1d(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w)
+            else:
+                logL_x = evaluate_mixture_MC_draws(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w)
+            x['logL_x'] = logL_x
         else:
-            logL_x = evaluate_mixture_MC_draws(self.nonpar.mu_MC, self.nonpar.sigma_MC, x.means, x.covs, x.w)
+            logL_x = x['logL_x']
         for j, i in enumerate(list(np.arange(self.nonpar.n_cl)) + ["new"]):
             if i == "new":
                 ss     = None
@@ -681,7 +698,12 @@ class HierHMM(HMM):
         Arguments:
             np.ndarray ev: event
         """
-        x = {'samples': ev[0], 'mix': np.random.choice(ev[1])}
+        x = {'samples': ev[0][np.random.choice(len(ev[0]), size = 1000)],
+             'mix': np.random.choice(ev[1]),
+             'logL_x': None,
+             }
+        if self.selfunc is not None:
+            x['selfunc'] = self.selfunc(x['samples'])
         self.stored_pts[int(np.sum(self.n_pts))] = x
         self._assign_to_component(x, pt_id = int(np.sum(self.n_pts)))
 
