@@ -169,7 +169,7 @@ class het_mixture:
         self.n_draws = int(n_draws)
         # Weights and normalisation
         if self.selfunc is not None:
-            self.intrinsic_weights = [wi*mi.norm for wi, mi in zip(self.weights[self.augment:], self.models[self.augment:])]
+            self.intrinsic_weights = [wi/mi.norm for wi, mi in zip(self.weights[self.augment:], self.models[self.augment:])]
             if self.augment:
                 if isinstance(self.models[0], mixture):
                     self.intrinsic_weights = [self.weights[0]*np.mean(1./self.selfunc(self.models[0].rvs(self.n_draws)))] + self.intrinsic_weights
