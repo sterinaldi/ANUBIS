@@ -137,7 +137,7 @@ class par_model:
         Returns:
             np.ndarray: p_intr.pdf(x|theta)*p_obs(x)/norm
         """
-        return self.model(x.flatten(), *pars, *shared_pars).flatten()
+        return self.model(x, *pars, *shared_pars).flatten()
 
 class het_mixture:
     """
@@ -181,9 +181,9 @@ class het_mixture:
                 else:
                     self.intrinsic_weights = [self.weights[0]*np.mean(1./self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (self.n_draws, len(self.bounds)))))] + self.intrinsic_weights
             self.intrinsic_weights = np.array(self.intrinsic_weights/np.sum(self.intrinsic_weights))
-            self.norm_intrinsic    = np.sum(self.intrinsic_weights[self.augment:])
         else:
             self.intrinsic_weights = self.weights
+        self.norm_intrinsic = np.sum(self.intrinsic_weights[self.augment:])
         if self.augment:
             self.probit = self.models[0].probit
         else:
@@ -304,7 +304,7 @@ class HMM:
         else:
             self.par_bounds = None
         if shared_par_bounds is not None:
-            self.shared_par_bounds = [np.atleast_2d(pb) if pb is not None else None for pb in shared_par_bounds]
+            self.shared_par_bounds = np.atleast_2d(shared_par_bounds)
             self.n_draws_pars = int(n_draws_pars)
         else:
             self.shared_par_bounds = None
@@ -567,11 +567,11 @@ class HMM:
             # In presence of shared parameters, the space is not separable anymore
             else:
                 # Joint distribution
-                log_total_p  = np.array([self.evaluated_logL[pt] for pt in range(int(np.sum(self.n_pts)))]).sum((0,1))
+                log_total_p  = np.array([self.evaluated_logL[pt][self.assignations[pt]] for pt in range(int(np.sum(self.n_pts)))]).sum(0)
                 vals         = np.exp(log_total_p - logsumexp_jit(log_total_p))
                 id           = np.random.choice(self.n_draws_pars, p = vals)
                 if self.par_bounds is not None:
-                    par_vals = [self.par_draws[i].T[id] if self.par_draws[i] is not None else [] for i in range(len(self.par_models))]
+                    par_vals = [self.par_draws[i][id].T if self.par_draws[i] is not None else [] for i in range(len(self.par_models))]
                 else:
                     par_vals = [[] for _ in range(len(self.par_models))]
                 shared_par_vals = self.shared_par_draws[id]
@@ -645,7 +645,7 @@ class HierHMM(HMM):
         super().__init__(models            = models,
                          bounds            = bounds,
                          pars              = pars,
-                         shared_pars       = shared_pars
+                         shared_pars       = shared_pars,
                          par_bounds        = par_bounds,
                          shared_par_bounds = shared_par_bounds,
                          prior_pars        = None,
@@ -702,7 +702,7 @@ class HierHMM(HMM):
                         for j, (p, sp, n) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws, self.components[i].norm)):
                             log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()*sf/n))
                     else:
-                        for j, (p, sp) in enumerate(self.par_draws[i_p], self.shared_par_draws):
+                        for j, (p, sp) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws)):
                             log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()*sf/self.components[i].norm))
                 else:
                     log_p = self.evaluated_logL[pt_id][i]
