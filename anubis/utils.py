@@ -10,7 +10,8 @@ def get_samples(draws):
     Returns:
         :np.ndarray: samples
     """
-    ll = [[list(d.models[i+d.augment].pars[:-d.n_shared_pars]) for i in range(len(d.models)-d.augment)] + [list(d.models[d.augment].pars[-d.n_shared_pars:])]  for d in draws]
+    n_shared_pars = [-d.n_shared_pars if d.n_shared_pars > 0 else len(d.models[d.augment].pars) for d in draws]
+    ll = [[list(d.models[i+d.augment].pars[:n]) for i in range(len(d.models)-d.augment)] + [list(d.models[d.augment].pars[n:])]  for d, n in zip(draws, n_shared_pars)]
     # Funny way of doing the right thing. I may rewrite it in the future, but it works for now...
     return np.array([s for d in ll for m in d for s in m]).reshape(len(draws), -1)
 
