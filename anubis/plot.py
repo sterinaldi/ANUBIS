@@ -242,7 +242,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
         else:
             plot_name = 'parameters.pdf'
         
-        n_parameters = int(np.sum([len(m.pars) for m in draws[0].models[draws[0].augment:]]))
+        n_parameters = int(np.sum([len(m.pars[:-draws[0].n_shared_pars]) for m in draws[0].models[draws[0].augment:]]) + draws[0].n_shared_pars)
         if pars_labels is None or not (len(pars_labels) == n_parameters):
             parameters_labels = ['$\\theta_{0}$'.format(i+1) for i in range(n_parameters)]
         else:
@@ -279,7 +279,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
             plot_name = 'joint.pdf'
 
         n_par_models = len(draws[0].models)-draws[0].augment
-        n_parameters = int(np.sum([len(m.pars) for m in draws[0].models[draws[0].augment:]]))
+        n_parameters = n_parameters = int(np.sum([len(m.pars[:-draws[0].n_shared_pars]) for m in draws[0].models[draws[0].augment:]]) + draws[0].n_shared_pars)
         if pars_labels is None or not (len(pars_labels) == n_parameters):
             parameters_labels = ['$\\theta_{0}$'.format(i+1) for i in range(n_parameters)]
         else:
