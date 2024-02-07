@@ -59,20 +59,21 @@ class par_model:
     def __call__(self, x):
         return self.pdf(x)
     
-    def _compute_normalisation(self, pars, n_draws):
+    def _compute_normalisation(self, pars, shared_pars, n_draws):
         """
         Computes the normalisation of the product p_intr(x|lambda)p_det(x) via monte carlo approximation
         
         Arguments:
-            np.ndarray pars: parameters of the distribution
-            int n_draws:     number of draws for the MC integral
+            np.ndarray pars:        parameters of the distribution
+            np.ndarray shared pars: shared parameters of the distribution
+            int n_draws:            number of draws for the MC integral
         """
         self.norm     = None
         volume        = np.prod(np.diff(self.bounds, axis = 1))
         samples       = rejection_sampler(int(n_draws), self.selfunc, self.bounds)
         self.sf_norm  = np.mean(self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (n_draws, len(self.bounds))))*volume)
         if pars is not None:
-            self.norm = np.atleast_1d([np.mean(self.model(samples, *p).flatten()*self.sf_norm) for p in pars])
+            self.norm = np.atleast_1d([np.mean(self.model(samples, *p, *sp).flatten()*self.sf_norm) for p, sp in zip(pars, shared_pars)])
             self.norm[self.norm == 0.] = np.inf
         else:
             self.norm = np.atleast_1d(np.mean(self.pdf_intrinsic(samples))*self.sf_norm)
@@ -104,38 +105,39 @@ class par_model:
         """
         return self.model(x, *self.pars)
     
-    def pdf_pars(self, x, pars):
+    def pdf_pars(self, x, pars, shared_pars):
         """
         Observed pdf with different realisations of the parameters theta.
         
         Arguments:
-            np.ndarray x:    point to evaluate the mixture at
-            np.ndarray pars: array of parameters
-        
+            np.ndarray x:           point to evaluate the mixture at
+            np.ndarray pars:        array of parameters
+            np.ndarray shared_pars: array of shared parameters
         Returns:
             np.ndarray: p_intr.pdf(x|theta)*p_obs(x)/norm
         """
         if self.norm is not None:
             if hasattr(self.norm, '__iter__'):
-                return np.array([self._model(x, p)/n for p, n in zip(pars, self.norm)])
+                return np.array([self._model(x, p, sp)/n for p, sp, n in zip(pars, shared_pars, self.norm)])
             else:
-                return np.array([self._model(x, p)/self.norm for p in pars])
+                return np.array([self._model(x, p, sp)/self.norm for p, sp in zip(pars, shared_pars)])
         else:
-            return np.array([self._model(x, p) for p in pars])
+            return np.array([self._model(x, p, sp) for p, sp in zip(pars, shared_pars)])
     
     @_selfunc
-    def _model(self, x, pars):
+    def _model(self, x, pars, shared_pars):
         """
         Decorated intrinsic distribution with explicit dependence of parameters theta
         
         Arguments:
-            np.ndarray x:    point to evaluate the mixture at
-            np.ndarray pars: array of parameters
+            np.ndarray x:           point to evaluate the mixture at
+            np.ndarray pars:        array of parameters
+            np.ndarray shared_pars: array of shared parameters
         
         Returns:
             np.ndarray: p_intr.pdf(x|theta)*p_obs(x)/norm
         """
-        return self.model(x.flatten(), *pars).flatten()
+        return self.model(x.flatten(), *pars, *shared_pars).flatten()
 
 class het_mixture:
     """
@@ -148,6 +150,7 @@ class het_mixture:
         bool augment:             whether the model includes a non-parametric augmentation
         callable selfunc:         selection function
         int n_draws:              number of draws for normalisation
+        int n_shared_pars:        number of shared parameters among models
         
     Returns:
         het_mixture: instance of het_mixture class
@@ -156,17 +159,19 @@ class het_mixture:
                        weights,
                        bounds,
                        augment,
-                       selfunc = None,
-                       n_draws = 1e4,
+                       selfunc       = None,
+                       n_draws       = 1e4,
+                       n_shared_pars = 0
                        ):
         # Components
-        self.models  = models
-        self.weights = weights
-        self.bounds  = np.atleast_2d(bounds)
-        self.dim     = len(self.bounds)
-        self.augment = augment
-        self.selfunc = selfunc
-        self.n_draws = int(n_draws)
+        self.models        = models
+        self.weights       = weights
+        self.bounds        = np.atleast_2d(bounds)
+        self.dim           = len(self.bounds)
+        self.augment       = augment
+        self.selfunc       = selfunc
+        self.n_draws       = int(n_draws)
+        self.n_shared_pars = int(n_shared_pars)
         # Weights and normalisation
         if self.selfunc is not None:
             self.intrinsic_weights = [wi/mi.norm for wi, mi in zip(self.weights[self.augment:], self.models[self.augment:])]
@@ -244,38 +249,42 @@ class HMM:
     Class to infer a distribution given a set of samples.
     
     Arguments:
-        list-of-callables:   models
-        iterable bounds:     boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
-        iterable pars:       fixed parameters of the parametric model(s)
-        iterable prior_pars: NIW prior parameters (k, L, nu, mu)
-        iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
-        callable selfunc:    selection function (if required)
-        double n_draws_pars: number of draws for MC integral over parameters
-        double n_draws_norm: number of draws for normalisation MC integral over parameters
-        double alpha0:       initial guess for concentration parameter
-        np.ndarray gamma0:   Dirichlet Distribution prior
-        bool probit:         whether to use the probit transformation for the DPGMM
-        bool augment:        whether to include the non-parametric channel
-        int n_reassignments: number of reassignments
-        np.ndarray norm:     normalisation constant for the parametric observed distributions. Use None if not available
+        list-of-callables:          models
+        iterable bounds:            boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
+        iterable pars:              fixed parameters of the parametric model(s)
+        iterable shared_pars:       shared fixed parameters of the parametric model(s)
+        iterable par_bounds:        boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
+        iterable shared_par_bounds: boundaries of the allowed values for the shared parameters. See above for the format.
+        iterable prior_pars:        NIW prior parameters (k, L, nu, mu)
+        callable selfunc:           selection function (if required)
+        double n_draws_pars:        number of draws for MC integral over parameters
+        double n_draws_norm:        number of draws for normalisation MC integral over parameters
+        double alpha0:              initial guess for concentration parameter
+        np.ndarray gamma0:          Dirichlet Distribution prior
+        bool probit:                whether to use the probit transformation for the DPGMM
+        bool augment:               whether to include the non-parametric channel
+        int n_reassignments:        number of reassignments
+        np.ndarray norm:            normalisation constant for the parametric observed distributions. Use None if not available
     
     Returns:
         HMM: instance of HMM class
     """
     def __init__(self, models,
                        bounds,
-                       pars            = None,
-                       par_bounds      = None,
-                       prior_pars      = None,
-                       selfunc         = None,
-                       n_draws_pars    = 1e3,
-                       n_draws_norm    = 1e4,
-                       alpha0          = 1.,
-                       gamma0          = None,
-                       probit          = False,
-                       augment         = True,
-                       n_reassignments = None,
-                       norm            = None,
+                       pars              = None,
+                       shared_pars       = None,
+                       par_bounds        = None,
+                       shared_par_bounds = None,
+                       prior_pars        = None,
+                       selfunc           = None,
+                       n_draws_pars      = 1e3,
+                       n_draws_norm      = 1e4,
+                       alpha0            = 1.,
+                       gamma0            = None,
+                       probit            = False,
+                       augment           = True,
+                       n_reassignments   = None,
+                       norm              = None,
                        ):
         # Settings
         self.bounds       = np.atleast_2d(bounds)
@@ -287,18 +296,25 @@ class HMM:
         if pars is None:
             pars = [[] for _ in models]
             self.n_draws_pars = 0
+        if shared_pars is None:
+            shared_pars = []
         if par_bounds is not None:
             self.par_bounds = [np.atleast_2d(pb) if pb is not None else None for pb in par_bounds]
             self.n_draws_pars = int(n_draws_pars)
         else:
             self.par_bounds = None
+        if shared_par_bounds is not None:
+            self.shared_par_bounds = [np.atleast_2d(pb) if pb is not None else None for pb in shared_par_bounds]
+            self.n_draws_pars = int(n_draws_pars)
+        else:
+            self.shared_par_bounds = None
         if self.selfunc is not None:
             self.n_draws_norm = int(n_draws_norm)
         if norm is None:
             self.norm   = [None for _ in models]
         else:
             self.norm   = norm
-        self.par_models = [par_model(mod, p, bounds, probit, selfunc, norm = n) for mod, p, n in zip(models, pars, self.norm)]
+        self.par_models = [par_model(mod, list(p) + list(shared_pars), bounds, probit, selfunc, norm = n) for mod, p, n in zip(models, pars, self.norm)]
         # DPGMM initialisation (if required)
         if self.augment:
             self.nonpar = DPGMM(bounds     = bounds,
@@ -310,7 +326,7 @@ class HMM:
             self.components   = [self.nonpar] + self.par_models
             self.n_components = len(models) + 1
         else:
-            self.components = self.par_models
+            self.components   = self.par_models
             self.n_components = len(models)
         # Gibbs sampler
         self.n_reassignments  = n_reassignments
@@ -352,12 +368,19 @@ class HMM:
         self.weights      = self.gamma0/np.sum(self.gamma0)
         self.stored_pts   = {}
         self.assignations = {}
-        if self.par_bounds is not None:
-            self.evaluated_logL = {}
-            self.par_draws      = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws_pars, len(b))) if b is not None else None for b in self.par_bounds]
-            self.log_total_p    = np.array([np.zeros(self.n_draws_pars) for _ in range(len(self.par_models))])
+        # Draw new parameter realisations
+        if self.par_bounds is not None or self.shared_par_bounds is not None:
+            self.evaluated_logL       = {}
+            if self.par_bounds is not None:
+                self.par_draws        = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws_pars, len(b))) if b is not None else None for b in self.par_bounds]
+            else:
+                self.par_draws        = [[[] for _ in range(self.n_draws_pars)] for _ in range(len(self.components[self.augment:]))]
+            if self.shared_par_bounds is not None:
+                self.shared_par_draws = np.random.uniform(low = self.shared_par_bounds[:,0], high = self.shared_par_bounds[:,1], size = (self.n_draws_pars, len(self.shared_par_bounds)))
+            else:
+                self.shared_par_draws = [[] for _ in range(self.n_draws_pars)]
         if self.selfunc is not None:
-            [m._compute_normalisation(p, self.n_draws_norm) for m, p, n in zip(self.components[self.augment:], self.par_draws, self.norm) if n is None]
+            [m._compute_normalisation(p, self.shared_par_draws, self.n_draws_norm) for m, p, n in zip(self.components[self.augment:], self.par_draws, self.norm) if n is None]
         if self.augment:
             self.nonpar.initialise()
             self.ids_nonpar = {}
@@ -423,13 +446,13 @@ class HMM:
         # Parametric
         else:
             # Fixed parameters or parameterless model
-            if self.par_bounds is None or self.par_bounds[i - self.augment] is None:
+            if (self.par_bounds is None or self.par_bounds[i - self.augment] is None) and self.shared_par_bounds is None:
                 return np.log(self.components[i].pdf(x)), np.zeros(self.n_draws_pars)
             # Marginalisation over parameters
             else:
                 i_p = i - self.augment
                 if not pt_id in list(self.evaluated_logL.keys()):
-                    log_p = np.log(self.components[i].pdf_pars(x, self.par_draws[i_p])).flatten()
+                    log_p = np.log(self.components[i].pdf_pars(x, self.par_draws[i_p], self.shared_par_draws)).flatten()
                 else:
                     log_p = self.evaluated_logL[pt_id][i]
                 log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0))
@@ -525,22 +548,41 @@ class HMM:
         Returns:
             het_mixture: the inferred distribution
         """
-        if self.par_bounds is not None:
-            par_vals = []
-            for i in range(len(self.par_models)):
-                if self.par_draws[i] is not None:
-                    pars        = self.par_draws[i].T
-                    i_p         = i + self.augment
-                    log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0))
-                    vals        = np.exp(log_total_p - logsumexp_jit(log_total_p))
-                    par_vals.append(np.atleast_1d([np.random.choice(p, p = vals) for p in pars]))
+        # Parameter estimation
+        if self.par_bounds is not None or self.shared_par_bounds is not None:
+            # If no parameters are shared among models, the parameter space is separable
+            if self.par_bounds is not None and self.shared_par_bounds is None:
+                par_vals = []
+                # Individual subspaces
+                for i in range(len(self.par_models)):
+                    if self.par_draws[i] is not None:
+                        pars        = self.par_draws[i].T
+                        i_p         = i + self.augment
+                        log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0))
+                        vals        = np.exp(log_total_p - logsumexp_jit(log_total_p))
+                        par_vals.append(np.atleast_1d([np.random.choice(p, p = vals) for p in pars]))
+                    else:
+                        par_vals.append([])
+                shared_par_vals = []
+            # In presence of shared parameters, the space is not separable anymore
+            else:
+                # Joint distribution
+                log_total_p  = np.array([self.evaluated_logL[pt] for pt in range(int(np.sum(self.n_pts)))]).sum((0,1))
+                vals         = np.exp(log_total_p - logsumexp_jit(log_total_p))
+                id           = np.random.choice(self.n_draws_pars, p = vals)
+                if self.par_bounds is not None:
+                    par_vals = [self.par_draws[i].T[id] if self.par_draws[i] is not None else [] for i in range(len(self.par_models))]
                 else:
-                    par_vals.append([])
-            par_models = [par_model(m.model, par, self.bounds, self.probit, self.selfunc, norm = n) for m, par, n in zip(self.par_models, par_vals, self.norm)]
+                    par_vals = [[] for _ in range(len(self.par_models))]
+                shared_par_vals = self.shared_par_draws[id]
+            par_models = [par_model(m.model, list(par) + list(shared_par_vals), self.bounds, self.probit, self.selfunc, norm = n) for m, par, n in zip(self.par_models, par_vals, self.norm)]
+            # Renormalise the models in presence of selection effects
             if self.selfunc is not None:
-                [m._compute_normalisation([p], self.n_draws_norm) for m, p, n in zip(par_models, par_vals, self.norm) if n is None]
+                [m._compute_normalisation([p], [shared_par_vals], self.n_draws_norm) for m, p, n in zip(par_models, par_vals, self.norm) if n is None]
+        # Fixed parameters
         else:
             par_models = self.par_models
+        # Non-parametric model (if required)
         if self.augment:
             if self.nonpar.n_pts == 0:
                 models = [par_model(uniform, [1./self.volume], self.bounds, self.probit)] + par_models
@@ -549,7 +591,12 @@ class HMM:
                 models = [nonpar] + par_models
         else:
             models = par_models
-        return het_mixture(models, dirichlet(self.n_pts+self.gamma0).rvs()[0], self.bounds, self.augment, selfunc = self.selfunc)
+        # Number of shared parameters
+        if self.shared_par_bounds is not None:
+            n_shared_pars = len(self.shared_par_bounds)
+        else:
+            n_shared_pars = 0
+        return het_mixture(models, dirichlet(self.n_pts+self.gamma0).rvs()[0], self.bounds, self.augment, selfunc = self.selfunc, n_shared_pars = n_shared_pars)
         
 class HierHMM(HMM):
     """
@@ -557,53 +604,59 @@ class HierHMM(HMM):
     Child of HMM class.
     
     Arguments:
-        list-of-callables:   models
-        iterable bounds:     boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
-        iterable pars:       fixed parameters of the parametric model(s)
-        iterable par_bounds: boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
-        iterable prior_pars: IW parameters for (H)DPGMM
-        callable selfunc:    selection function (if required)
-        double n_draws_pars: number of draws for MC integral over parameters
-        doubne MC_draws:     number of draws for MC integral for (H)DPGMM
-        double alpha0:       initial guess for concentration parameter
-        np.ndarray gamma0:   Dirichlet Distribution prior
-        bool probit:         whether to use the probit transformation for the (H)DPGMM
-        bool augment:        whether to include the non-parametric channel
-        int n_reassignments: number of reassignments. Default is reassign 5 times the number of available samples
-        np.ndarray norm:     normalisation constant for the parametric observed distributions. Use None if not available
+        list-of-callables:          models
+        iterable bounds:            boundaries of the rectangle over which the distribution is defined. It should be in the format [[xmin, xmax],[ymin, ymax],...]
+        iterable pars:              fixed parameters of the parametric model(s)
+        iterable shared_pars:       shared fixed parameters of the parametric model(s)
+        iterable par_bounds:        boundaries of the allowed values for the parameters. It should be in the format [[[xmin, xmax],[ymin, ymax]],[[xmin, xmax]],...]
+        iterable shared_par_bounds: boundaries of the allowed values for the shared parameters. See above for the format.
+        iterable prior_pars:        IW parameters for (H)DPGMM
+        callable selfunc:           selection function (if required)
+        double n_draws_pars:        number of draws for MC integral over parameters
+        doubne MC_draws:            number of draws for MC integral for (H)DPGMM
+        double alpha0:              initial guess for concentration parameter
+        np.ndarray gamma0:          Dirichlet Distribution prior
+        bool probit:                whether to use the probit transformation for the (H)DPGMM
+        bool augment:               whether to include the non-parametric channel
+        int n_reassignments:        number of reassignments. Default is reassign 5 times the number of available samples
+        np.ndarray norm:            normalisation constant for the parametric observed distributions. Use None if not available
     
     Returns:
         HierHMM: instance of HierHMM class
     """
     def __init__(self, models,
                        bounds,
-                       pars            = None,
-                       par_bounds      = None,
-                       prior_pars      = None,
-                       selfunc         = None,
-                       n_draws_pars    = 1e3,
-                       MC_draws        = None,
-                       alpha0          = 1.,
-                       gamma0          = None,
-                       probit          = False,
-                       augment         = True,
-                       n_reassignments = None,
-                       norm            = None,
+                       pars              = None,
+                       shared_pars       = None,
+                       par_bounds        = None,
+                       shared_par_bounds = None,
+                       prior_pars        = None,
+                       selfunc           = None,
+                       n_draws_pars      = 1e3,
+                       MC_draws          = None,
+                       alpha0            = 1.,
+                       gamma0            = None,
+                       probit            = False,
+                       augment           = True,
+                       n_reassignments   = None,
+                       norm              = None,
                        ):
         # Initialise the parent class
-        super().__init__(models          = models,
-                         bounds          = bounds,
-                         pars            = pars,
-                         par_bounds      = par_bounds,
-                         prior_pars      = None,
-                         selfunc         = selfunc,
-                         n_draws_pars    = n_draws_pars,
-                         alpha0          = alpha0,
-                         gamma0          = gamma0,
-                         probit          = probit,
-                         augment         = augment,
-                         n_reassignments = n_reassignments,
-                         norm            = norm,
+        super().__init__(models            = models,
+                         bounds            = bounds,
+                         pars              = pars,
+                         shared_pars       = shared_pars
+                         par_bounds        = par_bounds,
+                         shared_par_bounds = shared_par_bounds,
+                         prior_pars        = None,
+                         selfunc           = selfunc,
+                         n_draws_pars      = n_draws_pars,
+                         alpha0            = alpha0,
+                         gamma0            = gamma0,
+                         probit            = probit,
+                         augment           = augment,
+                         n_reassignments   = n_reassignments,
+                         norm              = norm,
                          )
         # (H)DPGMM initialisation (if required)
         if self.augment:
@@ -634,7 +687,7 @@ class HierHMM(HMM):
         # Parametric
         else:
             # Fixed parameters or parameter-less model
-            if self.par_bounds is None or self.par_bounds[i - self.augment] is None:
+            if (self.par_bounds is None or self.par_bounds[i - self.augment] is None) and self.shared_par_bounds is None:
                 return np.log(np.mean(self.components[i].pdf(x['samples']))), np.zeros(self.n_draws_pars)
             # Marginalisation over parameters
             else:
@@ -646,11 +699,11 @@ class HierHMM(HMM):
                 if not pt_id in list(self.evaluated_logL.keys()):
                     log_p = np.zeros(len(self.par_draws[i_p]))
                     if hasattr(self.components[i].norm, '__iter__'):
-                        for j, (p, n) in enumerate(zip(self.par_draws[i_p], self.components[i].norm)):
-                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p).flatten()*sf/n))
+                        for j, (p, sp, n) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws, self.components[i].norm)):
+                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()*sf/n))
                     else:
-                        for j, p in enumerate(self.par_draws[i_p]):
-                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p).flatten()*sf/self.components[i].norm))
+                        for j, (p, sp) in enumerate(self.par_draws[i_p], self.shared_par_draws):
+                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()*sf/self.components[i].norm))
                 else:
                     log_p = self.evaluated_logL[pt_id][i]
                 log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0))
