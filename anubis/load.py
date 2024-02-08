@@ -1,21 +1,28 @@
 import numpy as np
 import dill
 from figaro.load import load_data as load_data_figaro, load_density as load_density_figaro
+from anubis.utils import get_samples_and_weights, get_labels
 from anubis.exceptions import ANUBISException
 from pathlib import Path
 
-def save_density(draws, folder = '.', name = 'density'):
+def save_density(draws, folder = '.', name = 'density', pars_labels = None, par_models_labels = None):
     """
-    Exports a list of anubis.het_mixture instances to file
+    Exports a list of anubis.het_mixture instances and the corresponding samples to file
 
     Arguments:
-        :list draws:         list of mixtures to be saved
-        :str or Path folder: folder in which the output file will be saved
-        :str name:           name to be given to output file
+        :list draws:                   list of mixtures to be saved
+        :str or Path folder:           folder in which the output file will be saved
+        :str name:                     name to be given to output file
+        :list-of-str pars_labels:      labels for parameters
+        :list-of-str par_model_labels: labels for models (for weights)
     """
     with open(Path(folder, name+'.pkl'), 'wb') as f:
         dill.dump(draws, f)
-        
+    # Save samples
+    samples = get_samples_and_weights(draws)
+    labels = get_labels(draws, 'txt', pars_labels = pars_labels, par_models_labels = par_models_labels)
+    np.savetxt(Path(folder, name+'_samples.txt'), samples, header = ' '.join(labels))
+    
 def load_density(path):
     """
     Loads a list of anubis.het_mixture instances from path.
