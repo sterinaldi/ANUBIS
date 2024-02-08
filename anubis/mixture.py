@@ -751,7 +751,7 @@ class HierHMM(HMM):
         Arguments:
             np.ndarray ev: event
         """
-        x = {'samples': ev[0][np.random.choice(len(ev[0]), size = 1000)],
+        x = {'samples': ev[0],
              'mix': np.random.choice(ev[1]),
              'logL_x': None,
              }
