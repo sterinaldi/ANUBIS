@@ -9,7 +9,7 @@ from figaro.plot import plot_median_cr as figaro_plot_median_cr
 from figaro.plot import plot_1d_dist as figaro_plot_1d_dist
 from figaro.plot import plot_multidim
 
-from anubis.utils import get_samples, get_weights, get_samples_and_weights
+from anubis.utils import get_samples, get_weights, get_samples_and_weights, get_labels
 from anubis.exceptions import ANUBISException, import_doc
 
 plot_keys = ['pars', 'weights', 'joint', 'all']
@@ -242,15 +242,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
         else:
             plot_name = 'parameters.pdf'
         
-        if draws[0].n_shared_pars > 0:
-            shared_pars_idx = -draws[0].n_shared_pars
-        else:
-            shared_pars_idx = None
-        n_parameters  = int(np.sum([len(m.pars[:shared_pars_idx]) for m in draws[0].models[draws[0].augment:]]) + draws[0].n_shared_pars)
-        if pars_labels is None or not (len(pars_labels) == n_parameters):
-            parameter_labels = ['$\\theta_{0}$'.format(i+1) for i in range(n_parameters)]
-        else:
-            parameter_labels = ['${0}$'.format(l) for l in pars_labels]
+        parameter_labels = get_labels(draws, 'pars', pars_labels = pars_labels)
         c = corner(samples, labels = parameter_labels, truths = true_pars, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
         c.savefig(Path(out_folder, plot_name), bbox_inches = 'tight')
         plt.close(c)
@@ -262,14 +254,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
         else:
             plot_name = 'weights.pdf'
         
-        n_par_models = len(draws[0].models)-draws[0].augment
-        if par_models_labels is None or not (len(par_models_labels) == n_par_models):
-            weights_labels = ['$w_{'+'{0}'.format(i+1)+'}$' for i in range(n_par_models)]
-        else:
-            weights_labels = ['$w_{'+'{0}'.format(l)+'}$' for l in par_models_labels]
-        if np.array([d.augment for d in draws]).all():
-            weights_labels = ['$w_\\mathrm{np}$'] + weights_labels
-
+        weights_labels = get_labels(draws, 'weights', par_models_labels = par_models_labels)
         c = corner(samples, labels = weights_labels, truths = true_weights, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
         c.savefig(Path(out_folder, plot_name), bbox_inches = 'tight')
         plt.close(c)
@@ -281,26 +266,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
         else:
             plot_name = 'joint.pdf'
 
-        n_par_models = len(draws[0].models)-draws[0].augment
-        if draws[0].n_shared_pars > 0:
-            shared_pars_idx = -draws[0].n_shared_pars
-        else:
-            shared_pars_idx = None
-        n_parameters  = int(np.sum([len(m.pars[:shared_pars_idx]) for m in draws[0].models[draws[0].augment:]]) + draws[0].n_shared_pars)
-        if pars_labels is None or not (len(pars_labels) == n_parameters):
-            parameter_labels = ['$\\theta_{0}$'.format(i+1) for i in range(n_parameters)]
-        else:
-            parameter_labels = ['${0}$'.format(l) for l in pars_labels]
-
-        if par_models_labels is None or not (len(par_models_labels) == n_par_models):
-            weights_labels = ['$w_{'+'{0}'.format(i+1)+'}$' for i in range(n_par_models)]
-        else:
-            weights_labels = ['$w_{'+'{0}'.format(l)+'}$' for l in par_models_labels]
-
-        if np.array([d.augment for d in draws]).all():
-            weights_labels = ['$w_\\mathrm{np}$'] + weights_labels
-
-        joint_labels = parameter_labels + weights_labels
+        joint_labels = get_labels(draws, 'joint', pars_labels = pars_labels, par_models_labels = par_models_labels)
         if true_pars is None:
             true_pars = [None for _ in range(len(pars_labels))]
         if true_weights is None:
