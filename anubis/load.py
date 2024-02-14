@@ -1,9 +1,10 @@
 import numpy as np
 import dill
+import warnings
+from pathlib import Path
 from figaro.load import load_data as load_data_figaro, load_density as load_density_figaro
 from anubis.utils import get_samples_and_weights, get_labels
 from anubis.exceptions import ANUBISException
-from pathlib import Path
 
 def save_density(draws, folder = '.', name = 'density', pars_labels = None, par_models_labels = None):
     """
@@ -84,5 +85,7 @@ def load_data(path_samples, path_mixtures, *args, **kwargs):
         np.ndarray: names
     """
     samples, names = load_data_figaro(path_samples, *args, **kwargs)
-    mixtures       = [load_density_figaro(Path(path_mixtures, 'draws_'+ev+'.pkl')) for ev in names]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UserWarning)
+        mixtures = [load_density_figaro(Path(path_mixtures, 'draws_'+ev+'.json'), make_comp = False) for ev in names]
     return [[ss, mm] for ss, mm in zip(samples, mixtures)], names
