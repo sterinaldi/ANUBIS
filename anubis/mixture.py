@@ -9,8 +9,36 @@ from figaro._numba_functions import logsumexp_jit
 
 np.seterr(divide = 'ignore')
 
-def uniform(x, v):
-    return np.ones(np.shape(x))*v
+class uniform:
+    """
+    Class with the same methods as figaro.mixture.mixture (in particular, pdf and marginalise))
+    
+    Arguments:
+        np.ndarray bounds: 2d-array with bounds
+        bool probit:       probit transformation (for compatibility)
+    
+    Returns:
+        uniform: instance of uniform_model class
+    """
+    def __init__(self, bounds, probit):
+        self.bounds = bounds
+        self.probit = probit
+        self.volume = np.prod(np.diff(self.bounds, axis = 1))
+        self.dim    = len(self.bounds)
+        
+    
+    def pdf(self, x):
+        x = np.atleast_1d(x)
+        return np.ones(len(x))/self.volume
+
+    def logpdf(self, x):
+        x = np.atleast_1d(x)
+        return -np.ones(len(x))*np.log(self.volume)
+    
+    def marginalise(self, axis):
+        if len(axis) == 0:
+            return uniform(self.bounds, self.probit)
+        return uniform(np.delete(self.bounds, np.atleast_1d(axis), axis = 0), self.probit)
 
 class par_model:
     """
@@ -585,7 +613,7 @@ class HMM:
         # Non-parametric model (if required)
         if self.augment:
             if self.nonpar.n_pts == 0:
-                models = [par_model(uniform, [1./self.volume], self.bounds, self.probit)] + par_models
+                models = [uniform(self.bounds, self.probit)] + par_models
             else:
                 nonpar = self.nonpar.build_mixture()
                 models = [nonpar] + par_models
