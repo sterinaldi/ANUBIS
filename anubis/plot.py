@@ -5,9 +5,8 @@ import warnings
 from corner import corner
 from pathlib import Path
 
-from figaro.plot import plot_median_cr as figaro_plot_median_cr
-from figaro.plot import plot_1d_dist as figaro_plot_1d_dist
-from figaro.plot import plot_multidim
+from figaro.plot import plot_multidim, plot_median_cr as figaro_plot_median_cr, plot_1d_dist as figaro_plot_1d_dist
+from figaro.mixture import mixture
 
 from anubis.utils import get_samples, get_weights, get_samples_and_weights, get_labels
 from anubis.exceptions import ANUBISException, import_doc
@@ -131,7 +130,7 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
                         logy             = logy,
                         )
 
-def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, bounds = None, out_folder = '.', name = 'nonparametric', n_pts = None, labels = None, units = None, hierarchical = False, show = False, save = True, subfolder = False, true_value = None, true_value_label = '\mathrm{True\ value}', injected_label = '\mathrm{Simulated}', figsize = 7, levels = [0.5, 0.68, 0.9], scatter_points = False):
+def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, bounds = None, out_folder = '.', name = 'nonparametric', n_pts = None, labels = None, units = None, hierarchical = False, show = False, save = True, subfolder = False, true_value = None, true_value_label = '\mathrm{True\ value}', injected_label = '\mathrm{Simulated}', levels = [0.5, 0.68, 0.9], scatter_points = False):
     """
     Plot the recovered non-parametric distribution along with samples from the true distribution (if available).
     
@@ -153,7 +152,6 @@ def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, 
         :float true_value:                true value to infer
         :str true_value_label:            label to assign to the true value marker
         :str injected_label:              label to assign to the injected distribution
-        :double figsize:                  figure size (matplotlib)
         :iterable levels:                 credible levels to plot
         :bool scatter_points:             scatter samples on 2d plots
     """
@@ -202,7 +200,6 @@ def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, 
                       subfolder      = subfolder,
                       n_pts          = n_pts,
                       true_value     = true_value,
-                      figsize        = figsize,
                       levels         = levels,
                       scatter_points = scatter_points,
                       )
