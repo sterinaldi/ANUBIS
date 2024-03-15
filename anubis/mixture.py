@@ -26,7 +26,6 @@ class uniform:
         self.volume = np.prod(np.diff(self.bounds, axis = 1))
         self.dim    = len(self.bounds)
         
-    
     def pdf(self, x):
         x = np.atleast_1d(x)
         return np.ones(len(x))/self.volume
@@ -813,7 +812,7 @@ class HierHMM(HMM):
                 self.ids_nonpar[int(pt_id)] = len(list(self.nonpar.stored_pts.keys()))
                 self.nonpar.add_new_point([x['mix']])
             else:
-                self._reassign_point_nonpar(x['mix'], id_nonpar)
+                self._reassign_point_nonpar(x['mix'], id_nonpar, x['logL_x'])
         # Parameter estimation
         elif self.par_bounds is not None:
             self.evaluated_logL[pt_id] = vals
@@ -835,3 +834,15 @@ class HierHMM(HMM):
             id_nonpar  = self.ids_nonpar[id]
             self.nonpar._remove_from_cluster(x, self.nonpar.assignations[id_nonpar], self.nonpar.evaluated_logL[id_nonpar])
         self._assign_to_component(x, id, id_nonpar = id_nonpar, reassign = True)
+
+    def _reassign_point_nonpar(self, x, id_nonpar, logL_x):
+        """
+        Update the probability density reconstruction reassigining an existing sample
+        
+        Arguments:
+            x:         sample
+            id_nonpar: FIGARO id for the point
+            logL_x:    evaluated log likelihood
+        """
+        self.nonpar._assign_to_cluster(x, id_nonpar, logL_x = logL_x)
+        self.nonpar.alpha = _update_alpha(self.nonpar.alpha, self.nonpar.n_pts, (np.array(self.nonpar.N_list) > 0).sum(), self.nonpar.alpha_0)
