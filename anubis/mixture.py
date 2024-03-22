@@ -727,10 +727,10 @@ class HierHMM(HMM):
                     log_p = np.zeros(len(self.par_draws[i_p]))
                     if hasattr(self.components[i].norm, '__iter__'):
                         for j, (p, sp, n) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws, self.components[i].norm)):
-                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()/n))
+                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()*selfunc))
                     else:
                         for j, (p, sp) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws)):
-                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()/self.components[i].norm))
+                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()*selfunc))
                 else:
                     log_p = self.evaluated_logL[pt_id][i]
                 log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0))
