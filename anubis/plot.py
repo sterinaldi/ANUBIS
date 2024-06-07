@@ -82,7 +82,7 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
     
     x    = np.linspace(x_min, x_max, n_pts)
     dx   = x[1]-x[0]
-    probs = np.array([d.pdf_intrinsic(x) for d in draws])
+    probs = np.array([d.pdf(x) for d in draws])
     
     figaro_plot_1d_dist(x                = x,
                         draws            = probs,
@@ -109,7 +109,7 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
             observed /= np.sum(observed*dx)
         else:
             observed = None
-        probs = np.array([np.sum([d.weights[i+d.augment]*model.pdf(x) for i, model in enumerate(d.models[d.augment:])], axis = 0) for d in draws])
+        probs = np.array([np.sum([d.weights[i+d.augment]*model.pdf_observed(x) for i, model in enumerate(d.models[d.augment:])], axis = 0) for d in draws])
         probs = np.array([p/np.sum(p*dx) for p in probs])
         figaro_plot_1d_dist(x            = x,
                         draws            = probs,
