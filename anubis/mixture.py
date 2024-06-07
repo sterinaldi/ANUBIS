@@ -330,6 +330,7 @@ class HMM:
         self.probit       = probit
         self.augment      = augment
         self.selfunc      = selection_function
+        self.hierarchical = False
         # Parametric models
         if pars is None:
             pars = [[] for _ in models]
@@ -352,7 +353,7 @@ class HMM:
             self.norm   = [None for _ in models]
         else:
             self.norm   = norm
-        self.par_models = [par_model(mod, list(p) + list(shared_pars), bounds, probit, selfunc, norm = n, hierarchical = False) for mod, p, n in zip(models, pars, self.norm)]
+        self.par_models = [par_model(mod, list(p) + list(shared_pars), bounds, probit, hierarchical = False, selfunc = self.selfunc, norm = n) for mod, p, n in zip(models, pars, self.norm)]
         # DPGMM initialisation (if required)
         if self.augment:
             self.nonpar = DPGMM(bounds     = bounds,
@@ -418,7 +419,7 @@ class HMM:
             else:
                 self.shared_par_draws = [[] for _ in range(self.n_draws_pars)]
         if self.selfunc is not None:
-            [m._compute_normalisation(p, self.shared_par_draws, self.n_draws_norm) for m, p, n in zip(self.components[self.augment:], self.par_draws, self.norm) if n is None]
+            [m._compute_alpha_factor(p, self.shared_par_draws, self.n_draws_norm) for m, p, n in zip(self.components[self.augment:], self.par_draws, self.norm) if n is None]
         if self.augment:
             self.nonpar.initialise()
             self.ids_nonpar = {}
@@ -613,10 +614,10 @@ class HMM:
                 else:
                     par_vals = [[] for _ in range(len(self.par_models))]
                 shared_par_vals = self.shared_par_draws[id]
-            par_models = [par_model(m.model, list(par) + list(shared_par_vals), self.bounds, self.probit, self.selfunc, norm = n, hierarchical = self.hierarchical) for m, par, n in zip(self.par_models, par_vals, self.norm)]
+            par_models = [par_model(m.model, list(par) + list(shared_par_vals), self.bounds, self.probit, hierarchical = True, selfunc = self.selfunc, norm = n) for m, par, n in zip(self.par_models, par_vals, self.norm)]
             # Renormalise the models in presence of selection effects
             if self.selfunc is not None:
-                [m._compute_normalisation([p], [shared_par_vals], self.n_draws_norm) for m, p, n in zip(par_models, par_vals, self.norm) if n is None]
+                [m._compute_alpha_factor([p], [shared_par_vals], self.n_draws_norm) for m, p, n in zip(par_models, par_vals, self.norm) if n is None]
         # Fixed parameters
         else:
             par_models = self.par_models
@@ -687,7 +688,7 @@ class HierHMM(HMM):
                          par_bounds         = par_bounds,
                          shared_par_bounds  = shared_par_bounds,
                          prior_pars         = None,
-                         selection_function = selection_funtion,
+                         selection_function = selection_function,
                          n_draws_pars       = n_draws_pars,
                          alpha0             = alpha0,
                          gamma0             = gamma0,
@@ -697,7 +698,9 @@ class HierHMM(HMM):
                          norm               = norm,
                          )
         # Setting the hierarchical flag to True
-        [model.hierarchical = True for model in self.par_models]
+        self.hierarchical = True
+        for model in self.par_models:
+            model.hierarchical = True
         # (H)DPGMM initialisation (if required)
         if self.augment:
             self.nonpar      = HDPGMM(bounds             = bounds,
@@ -735,12 +738,12 @@ class HierHMM(HMM):
                 i_p = i - self.augment
                 if not pt_id in list(self.evaluated_logL.keys()):
                     log_p = np.zeros(len(self.par_draws[i_p]))
-                    if hasattr(self.components[i].norm, '__iter__'):
-                        for j, (p, sp, n) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws, self.components[i].norm)):
+                    if hasattr(self.components[i].alpha, '__iter__'):
+                        for j, (p, sp, n) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws, self.components[i].alpha)):
                             log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()/n))
                     else:
                         for j, (p, sp) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws)):
-                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()/self.components[i].norm))
+                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()/self.components[i].alpha))
                 else:
                     log_p = self.evaluated_logL[pt_id][i]
                 log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0))
