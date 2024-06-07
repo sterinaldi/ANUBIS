@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.stats import dirichlet
 
+from anubis.exceptions import ANUBISException
 from figaro.mixture import DPGMM, HDPGMM, mixture, _update_alpha
 from figaro.decorators import probit
 from figaro.utils import rejection_sampler
@@ -11,7 +12,7 @@ np.seterr(divide = 'ignore')
 
 class uniform:
     """
-    Class with the same methods as figaro.mixture.mixture (in particular, pdf and marginalise))
+    Class with the same methods as figaro.mixture.mixture (in particular, pdf and marginalise)
     
     Arguments:
         np.ndarray bounds: 2d-array with bounds
@@ -58,26 +59,28 @@ class par_model:
                        pars,
                        bounds,
                        probit,
+                       hierarchical,
                        selfunc = None,
                        norm = None,
                        ):
-        self.model    = model
-        self.pars     = pars
-        self.bounds   = np.atleast_2d(bounds)
-        self.dim      = len(self.bounds)
-        self.probit   = probit
-        self.selfunc  = selfunc
+        self.model        = model
+        self.hierarchical = hierarchical
+        self.pars         = pars
+        self.bounds       = np.atleast_2d(bounds)
+        self.dim          = len(self.bounds)
+        self.probit       = probit
+        self.selfunc      = selfunc
         if norm is not None:
-            self.norm = norm
+            self.alpha = norm
         else:
-            self.norm = 1.
+            self.alpha = 1.
     
     def _selfunc(func):
         """
         Applies the selection function to to the intrinsic distribution.
         """
         def observed_model(self, x, *args):
-            if self.selfunc is not None:
+            if not self.hierarchical and self.selfunc is not None:
                 return func(self, x, *args)*self.selfunc(x)
             else:
                 return func(self, x, *args)
@@ -86,28 +89,28 @@ class par_model:
     def __call__(self, x):
         return self.pdf(x)
     
-    def _compute_normalisation(self, pars, shared_pars, n_draws):
+    def _compute_alpha_factor(self, pars, shared_pars, n_draws):
         """
         Computes the normalisation of the product p_intr(x|lambda)p_det(x) via monte carlo approximation
+        (Eq. 6 of Mandel et al. 2019)
         
         Arguments:
             np.ndarray pars:        parameters of the distribution
             np.ndarray shared pars: shared parameters of the distribution
             int n_draws:            number of draws for the MC integral
         """
-        self.norm     = None
-        volume        = np.prod(np.diff(self.bounds, axis = 1))
-        samples       = rejection_sampler(int(n_draws), self.selfunc, self.bounds)
-        self.sf_norm  = np.mean(self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (n_draws, len(self.bounds))))*volume)
+        self.alpha   = None
+        volume       = np.prod(np.diff(self.bounds, axis = 1))
+        samples      = rejection_sampler(int(n_draws), self.selfunc, self.bounds)
+        self.sf_norm = np.mean(self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (n_draws, len(self.bounds))))*volume)
         if pars is not None:
-            self.norm = np.atleast_1d([np.mean(self.model(samples, *p, *sp).flatten()*self.sf_norm) for p, sp in zip(pars, shared_pars)])
-            self.norm[self.norm == 0.] = np.inf
+            self.alpha = np.atleast_1d([np.mean(self.model(samples, *p, *sp).flatten()*self.sf_norm) for p, sp in zip(pars, shared_pars)])
+            self.alpha[self.alpha == 0.] = np.inf
         else:
-            self.norm = np.atleast_1d(np.mean(self.pdf_intrinsic(samples))*self.sf_norm)
-        if len(self.norm) == 1:
-            self.norm = self.norm[0]
+            self.alpha = np.atleast_1d(np.mean(self.pdf(samples))*self.sf_norm)
+        if len(self.alpha) == 1:
+            self.alpha = self.alpha[0]
     
-    @_selfunc
     def pdf(self, x):
         """
         pdf of the observed distribution
@@ -118,9 +121,10 @@ class par_model:
         Returns:
             np.ndarray: p_intr.pdf(x)*p_obs(x)/norm
         """
-        return self.model(x, *self.pars)/self.norm
+        return self.model(x, *self.pars)
     
-    def pdf_intrinsic(self, x):
+    @_selfunc
+    def pdf_observed(self, x):
         """
         pdf of the intrinsic distribution
         
@@ -130,7 +134,7 @@ class par_model:
         Returns:
             np.ndarray: p_intr.pdf(x)
         """
-        return self.model(x, *self.pars)
+        return self.model(x, *self.pars)/self.alpha
     
     def pdf_pars(self, x, pars, shared_pars):
         """
@@ -143,11 +147,11 @@ class par_model:
         Returns:
             np.ndarray: p_intr.pdf(x|theta)*p_obs(x)/norm
         """
-        if self.norm is not None:
-            if hasattr(self.norm, '__iter__'):
-                return np.array([self._model(x, p, sp)/n for p, sp, n in zip(pars, shared_pars, self.norm)])
+        if self.alpha is not None:
+            if hasattr(self.alpha, '__iter__'):
+                return np.array([self._model(x, p, sp)/a for p, sp, a in zip(pars, shared_pars, self.alpha)])
             else:
-                return np.array([self._model(x, p, sp)/self.norm for p, sp in zip(pars, shared_pars)])
+                return np.array([self._model(x, p, sp)/self.alpha for p, sp in zip(pars, shared_pars)])
         else:
             return np.array([self._model(x, p, sp) for p, sp in zip(pars, shared_pars)])
     
@@ -162,7 +166,7 @@ class par_model:
             np.ndarray shared_pars: array of shared parameters
         
         Returns:
-            np.ndarray: p_intr.pdf(x|theta)*p_obs(x)/norm
+            np.ndarray: p_intr.pdf(x|theta)*p_obs(x)
         """
         return self.model(x, *pars, *shared_pars).flatten()
 
@@ -186,12 +190,14 @@ class het_mixture:
                        weights,
                        bounds,
                        augment,
+                       hierarchical,
                        selfunc       = None,
                        n_draws       = 1e4,
-                       n_shared_pars = 0
+                       n_shared_pars = 0,
                        ):
         # Components
         self.models        = models
+        self.hierarchical  = hierarchical
         self.weights       = weights
         self.bounds        = np.atleast_2d(bounds)
         self.dim           = len(self.bounds)
@@ -200,17 +206,18 @@ class het_mixture:
         self.n_draws       = int(n_draws)
         self.n_shared_pars = int(n_shared_pars)
         # Weights and normalisation
-        if self.selfunc is not None:
-            self.intrinsic_weights = [wi/mi.norm for wi, mi in zip(self.weights[self.augment:], self.models[self.augment:])]
+        if self.selfunc is not None and not self.hierarchical:
+            self.intrinsic_weights = [wi/mi.alpha for wi, mi in zip(self.weights[self.augment:], self.models[self.augment:])]
             if self.augment:
                 if isinstance(self.models[0], mixture):
                     self.intrinsic_weights = [self.weights[0]*np.mean(1./self.selfunc(self.models[0].rvs(self.n_draws)))] + self.intrinsic_weights
                 else:
                     self.intrinsic_weights = [self.weights[0]*np.mean(1./self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (self.n_draws, len(self.bounds)))))] + self.intrinsic_weights
             self.intrinsic_weights = np.array(self.intrinsic_weights/np.sum(self.intrinsic_weights))
+            self.norm_intrinsic    = np.sum(self.intrinsic_weights[self.augment:])
         else:
             self.intrinsic_weights = self.weights
-        self.norm_intrinsic = np.sum(self.intrinsic_weights[self.augment:])
+            self.norm_intrinsic    = 1.
         if self.augment:
             self.probit = self.models[0].probit
         else:
@@ -221,7 +228,7 @@ class het_mixture:
     
     def pdf(self, x):
         """
-        Evaluate mixture at point(s) x (observed)
+        Evaluate mixture at point(s) x
         
         Arguments:
             np.ndarray x: point(s) to evaluate the mixture at
@@ -229,11 +236,11 @@ class het_mixture:
         Returns:
             np.ndarray: het_mixture.pdf(x)
         """
-        return np.array([wi*mi.pdf(x) for wi, mi in zip(self.weights, self.models)]).sum(axis = 0)
+        return np.array([wi*mi.pdf(x)/self.norm_intrinsic for wi, mi in zip(self.intrinsic_weights, self.models[(self.augment and not self.hierarchical):])]).sum(axis = 0)
     
     def logpdf(self, x):
         """
-        Evaluate log mixture at point(s) x (observed)
+        Evaluate log mixture at point(s) x
         
         Arguments:
             np.ndarray x: point(s) to evaluate the mixture at
@@ -243,9 +250,9 @@ class het_mixture:
         """
         return np.log(self.pdf(x))
 
-    def pdf_intrinsic(self, x):
+    def pdf_observed(self, x):
         """
-        Evaluate mixture at point(s) x (intrinsic)
+        Evaluate mixture at point(s) x (observed)
         
         Arguments:
             np.ndarray x: point(s) to evaluate the mixture at
@@ -253,11 +260,13 @@ class het_mixture:
         Returns:
             np.ndarray: het_mixture.pdf(x)
         """
-        return np.array([wi*mi.pdf_intrinsic(x)/self.norm_intrinsic for wi, mi in zip(self.intrinsic_weights[self.augment:], self.models[self.augment:])]).sum(axis = 0)
+        if self.hierarchical:
+            raise ANUBISException("Observed distribution not available for hierarchical reconstructions")
+        return np.array([wi*mi.pdf_observed(x) for wi, mi in zip(self.weights, self.models)]).sum(axis = 0)
     
-    def logpdf_intrinsic(self, x):
+    def logpdf_observed(self, x):
         """
-        Evaluate log mixture at point(s) x (intrinsic)
+        Evaluate log mixture at point(s) x (observed)
         
         Arguments:
             np.ndarray x: point(s) to evaluate the mixture at
@@ -265,7 +274,9 @@ class het_mixture:
         Returns:
             np.ndarray: het_mixture.logpdf(x)
         """
-        return np.log(self.pdf_intrinsic(x))
+        if self.hierarchical:
+            raise ANUBISException("Observed distribution not available for hierarchical reconstructions")
+        return np.log(self.pdf_observed(x))
 
 #-----------------#
 # Inference class #
@@ -298,27 +309,27 @@ class HMM:
     """
     def __init__(self, models,
                        bounds,
-                       pars              = None,
-                       shared_pars       = None,
-                       par_bounds        = None,
-                       shared_par_bounds = None,
-                       prior_pars        = None,
-                       selfunc           = None,
-                       n_draws_pars      = 1e3,
-                       n_draws_norm      = 1e4,
-                       alpha0            = 1.,
-                       gamma0            = None,
-                       probit            = False,
-                       augment           = True,
-                       n_reassignments   = None,
-                       norm              = None,
+                       pars               = None,
+                       shared_pars        = None,
+                       par_bounds         = None,
+                       shared_par_bounds  = None,
+                       prior_pars         = None,
+                       selection_function = None,
+                       n_draws_pars       = 1e3,
+                       n_draws_norm       = 1e4,
+                       alpha0             = 1.,
+                       gamma0             = None,
+                       probit             = False,
+                       augment            = True,
+                       n_reassignments    = None,
+                       norm               = None,
                        ):
         # Settings
         self.bounds       = np.atleast_2d(bounds)
         self.dim          = len(self.bounds)
         self.probit       = probit
         self.augment      = augment
-        self.selfunc      = selfunc
+        self.selfunc      = selection_function
         # Parametric models
         if pars is None:
             pars = [[] for _ in models]
@@ -341,7 +352,7 @@ class HMM:
             self.norm   = [None for _ in models]
         else:
             self.norm   = norm
-        self.par_models = [par_model(mod, list(p) + list(shared_pars), bounds, probit, selfunc, norm = n) for mod, p, n in zip(models, pars, self.norm)]
+        self.par_models = [par_model(mod, list(p) + list(shared_pars), bounds, probit, selfunc, norm = n, hierarchical = False) for mod, p, n in zip(models, pars, self.norm)]
         # DPGMM initialisation (if required)
         if self.augment:
             self.nonpar = DPGMM(bounds     = bounds,
@@ -602,7 +613,7 @@ class HMM:
                 else:
                     par_vals = [[] for _ in range(len(self.par_models))]
                 shared_par_vals = self.shared_par_draws[id]
-            par_models = [par_model(m.model, list(par) + list(shared_par_vals), self.bounds, self.probit, self.selfunc, norm = n) for m, par, n in zip(self.par_models, par_vals, self.norm)]
+            par_models = [par_model(m.model, list(par) + list(shared_par_vals), self.bounds, self.probit, self.selfunc, norm = n, hierarchical = self.hierarchical) for m, par, n in zip(self.par_models, par_vals, self.norm)]
             # Renormalise the models in presence of selection effects
             if self.selfunc is not None:
                 [m._compute_normalisation([p], [shared_par_vals], self.n_draws_norm) for m, p, n in zip(par_models, par_vals, self.norm) if n is None]
@@ -623,7 +634,7 @@ class HMM:
             n_shared_pars = len(self.shared_par_bounds)
         else:
             n_shared_pars = 0
-        return het_mixture(models, dirichlet(self.n_pts+self.gamma0).rvs()[0], self.bounds, self.augment, selfunc = self.selfunc, n_shared_pars = n_shared_pars)
+        return het_mixture(models, dirichlet(self.n_pts+self.gamma0).rvs()[0], self.bounds, self.augment, selfunc = self.selfunc, n_shared_pars = n_shared_pars, hierarchical = self.hierarchical)
         
 class HierHMM(HMM):
     """
@@ -653,45 +664,48 @@ class HierHMM(HMM):
     """
     def __init__(self, models,
                        bounds,
-                       pars              = None,
-                       shared_pars       = None,
-                       par_bounds        = None,
-                       shared_par_bounds = None,
-                       prior_pars        = None,
-                       selfunc           = None,
-                       n_draws_pars      = 1e3,
-                       MC_draws          = None,
-                       alpha0            = 1.,
-                       gamma0            = None,
-                       probit            = False,
-                       augment           = True,
-                       n_reassignments   = None,
-                       norm              = None,
+                       pars               = None,
+                       shared_pars        = None,
+                       par_bounds         = None,
+                       shared_par_bounds  = None,
+                       prior_pars         = None,
+                       selection_function = None,
+                       n_draws_pars       = 1e3,
+                       MC_draws           = None,
+                       alpha0             = 1.,
+                       gamma0             = None,
+                       probit             = False,
+                       augment            = True,
+                       n_reassignments    = None,
+                       norm               = None,
                        ):
         # Initialise the parent class
-        super().__init__(models            = models,
-                         bounds            = bounds,
-                         pars              = pars,
-                         shared_pars       = shared_pars,
-                         par_bounds        = par_bounds,
-                         shared_par_bounds = shared_par_bounds,
-                         prior_pars        = None,
-                         selfunc           = selfunc,
-                         n_draws_pars      = n_draws_pars,
-                         alpha0            = alpha0,
-                         gamma0            = gamma0,
-                         probit            = probit,
-                         augment           = augment,
-                         n_reassignments   = n_reassignments,
-                         norm              = norm,
+        super().__init__(models             = models,
+                         bounds             = bounds,
+                         pars               = pars,
+                         shared_pars        = shared_pars,
+                         par_bounds         = par_bounds,
+                         shared_par_bounds  = shared_par_bounds,
+                         prior_pars         = None,
+                         selection_function = selection_funtion,
+                         n_draws_pars       = n_draws_pars,
+                         alpha0             = alpha0,
+                         gamma0             = gamma0,
+                         probit             = probit,
+                         augment            = augment,
+                         n_reassignments    = n_reassignments,
+                         norm               = norm,
                          )
+        # Setting the hierarchical flag to True
+        [model.hierarchical = True for model in self.par_models]
         # (H)DPGMM initialisation (if required)
         if self.augment:
-            self.nonpar      = HDPGMM(bounds     = bounds,
-                                      prior_pars = prior_pars,
-                                      alpha0     = alpha0,
-                                      probit     = self.probit,
-                                      MC_draws   = MC_draws,
+            self.nonpar      = HDPGMM(bounds             = bounds,
+                                      prior_pars         = prior_pars,
+                                      alpha0             = alpha0,
+                                      probit             = self.probit,
+                                      MC_draws           = MC_draws,
+                                      selection_function = selection_function,
                                       )
             self.components  = [self.nonpar] + self.par_models
         
@@ -719,18 +733,14 @@ class HierHMM(HMM):
             # Marginalisation over parameters
             else:
                 i_p = i - self.augment
-                if self.selfunc is not None:
-                    sf = x['selfunc']
-                else:
-                    sf = 1.
                 if not pt_id in list(self.evaluated_logL.keys()):
                     log_p = np.zeros(len(self.par_draws[i_p]))
                     if hasattr(self.components[i].norm, '__iter__'):
                         for j, (p, sp, n) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws, self.components[i].norm)):
-                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()*sf/n))
+                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()/n))
                     else:
                         for j, (p, sp) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws)):
-                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()*sf/self.components[i].norm))
+                            log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()/self.components[i].norm))
                 else:
                     log_p = self.evaluated_logL[pt_id][i]
                 log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0))
@@ -751,9 +761,9 @@ class HierHMM(HMM):
         scores = np.zeros(self.nonpar.n_cl + 1)
         if x['logL_x'] is None:
             if self.dim == 1:
-                logL_x = evaluate_mixture_MC_draws_1d(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w)
+                logL_x = evaluate_mixture_MC_draws_1d(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w) - self.nonpar.log_alpha_factor
             else:
-                logL_x = evaluate_mixture_MC_draws(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w)
+                logL_x = evaluate_mixture_MC_draws(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w) - self.nonpar.log_alpha_factor
             x['logL_x'] = logL_x
         else:
             logL_x = x['logL_x']
@@ -782,8 +792,6 @@ class HierHMM(HMM):
              'mix': np.random.choice(ev[1]),
              'logL_x': None,
              }
-        if self.selfunc is not None:
-            x['selfunc'] = self.selfunc(x['samples'])
         self.stored_pts[int(np.sum(self.n_pts))] = x
         self._assign_to_component(x, pt_id = int(np.sum(self.n_pts)))
 
