@@ -64,12 +64,6 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
     x_min = np.max(all_bounds[:,0])
     x_max = np.min(all_bounds[:,1])
     
-    sel_eff = np.array([d.selfunc is not None for d in draws]).all()
-    if sel_eff and selfunc:
-        name_intrinsic = 'true_'+name
-    else:
-        name_intrinsic = name
-    
     if bounds is not None:
         if not bounds[0] >= x_min and probit:
             warnings.warn("The provided lower bound is invalid for at least one draw. {0} will be used instead.".format(x_min))
@@ -82,38 +76,11 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
     
     x    = np.linspace(x_min, x_max, n_pts)
     dx   = x[1]-x[0]
-    probs = np.array([d.pdf(x) for d in draws])
+    probs = np.array([d.pdf_parametric(x) for d in draws])
     
     figaro_plot_1d_dist(x                = x,
                         draws            = probs,
                         injected         = injected,
-                        samples          = samples,
-                        out_folder       = out_folder,
-                        name             = name_intrinsic,
-                        label            = label,
-                        unit             = unit,
-                        show             = show,
-                        save             = save,
-                        subfolder        = subfolder,
-                        true_value       = true_value,
-                        true_value_label = true_value_label,
-                        injected_label   = injected_label,
-                        median_label     = median_label,
-                        logx             = logx,
-                        logy             = logy,
-                        )
-    
-    if sel_eff and selfunc is not None:
-        if injected is not None:
-            observed  = injected(x)*selfunc(x)
-            observed /= np.sum(observed*dx)
-        else:
-            observed = None
-        probs = np.array([np.sum([d.weights[i+d.augment]*model.pdf_observed(x) for i, model in enumerate(d.models[d.augment:])], axis = 0) for d in draws])
-        probs = np.array([p/np.sum(p*dx) for p in probs])
-        figaro_plot_1d_dist(x            = x,
-                        draws            = probs,
-                        injected         = observed,
                         samples          = samples,
                         out_folder       = out_folder,
                         name             = name,
@@ -124,7 +91,7 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
                         subfolder        = subfolder,
                         true_value       = true_value,
                         true_value_label = true_value_label,
-                        injected_label   = '\mathrm{Selection\ effects}',
+                        injected_label   = injected_label,
                         median_label     = median_label,
                         logx             = logx,
                         logy             = logy,
@@ -159,7 +126,7 @@ def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, 
         warnings.warn("No non-parametric augmentation. No plot produced.")
         return
         
-    nonpar = [d.models[0] for d in draws]
+    nonpar = [d.models[0].mixture for d in draws]
     
     if draws[0].dim == 1:
         if n_pts is None:
