@@ -22,10 +22,11 @@ class uniform:
         uniform: instance of uniform_model class
     """
     def __init__(self, bounds, probit):
-        self.bounds = bounds
-        self.probit = probit
-        self.volume = np.prod(np.diff(self.bounds, axis = 1))
-        self.dim    = len(self.bounds)
+        self.bounds       = bounds
+        self.probit       = probit
+        self.volume       = np.prod(np.diff(self.bounds, axis = 1))
+        self.dim          = len(self.bounds)
+        self.alpha_factor = 1.
         
     def pdf(self, x):
         x = np.atleast_1d(x)
@@ -35,10 +36,101 @@ class uniform:
         x = np.atleast_1d(x)
         return -np.ones(len(x))*np.log(self.volume)
     
+    def rvs(self, size = 1.):
+        size = int(size)
+        return np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (size, len(self.bounds)))
+        
     def marginalise(self, axis):
         if len(axis) == 0:
             return uniform(self.bounds, self.probit)
         return uniform(np.delete(self.bounds, np.atleast_1d(axis), axis = 0), self.probit)
+
+class nonpar_model:
+    """
+    Wrapper for the figaro.mixture.mixture class with additional methods to include the observed/intrinsic pdf/logpdf automatically.
+    
+    Arguments:
+        figaro.mixture.mixture mixture: non-parametric model
+        bool hierarchical:              whether the model comes from a hierarchical inference or not
+        callable selfunc:               selection function (if required)
+    """
+    def __init__(self, mixture, hierarchical, selfunc = None):
+        self.mixture = mixture
+        self.hierarchical = hierarchical
+        self.selfunc = selfunc
+        self.probit = self.mixture.probit
+        if self.selfunc is not None:
+            if self.hierarchical:
+                self.alpha = 1./self.mixture.alpha_factor
+            else:
+                self.alpha = np.mean(1./self.selfunc(self.mixture.rvs(size = int((self.mixture.dim+1)*1e3))))
+    
+    def __call__(self, x):
+        return self.pdf(x)
+
+    def pdf(self, x):
+        """
+        pdf of the intrinsic distribution
+        
+        Arguments:
+            np.ndarray x: point to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: mixture.pdf(x)
+        """
+        if self.selfunc is None or self.hierarchical:
+            return self.mixture.pdf(x)
+        else:
+            with np.errstate(divide = 'ignore', invalid = 'ignore'):
+                return np.nan_to_num(self.mixture.pdf(x)/self.selfunc(x)*self.alpha, nan = 0., posinf = 0., neginf = 0.)
+    
+    def logpdf(self, x):
+        """
+        logpdf of the intrinsic distribution
+        
+        Arguments:
+            np.ndarray x: point to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: mixture.logpdf(x)
+        """
+        if self.selfunc is None or self.hierarchical:
+            return self.mixture.logpdf(x)
+        else:
+            with np.errstate(divide = 'ignore', invalid = 'ignore'):
+                return np.nan_to_num(self.mixture.logpdf(x) - np.log(self.selfunc(x)) + np.log(self.alpha), nan = -np.inf, posinf = -np.inf)
+    
+    def pdf_observed(self, x):
+        """
+        pdf of the observed distribution
+        
+        Arguments:
+            np.ndarray x: point to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: mixture.pdf(x)
+        """
+        if self.selfunc is None or not self.hierarchical:
+            return self.mixture.pdf(x)
+        else:
+            with np.errstate(divide = 'ignore', invalid = 'ignore'):
+                return np.nan_to_num(self.mixture.pdf(x)*self.selfunc(x)*self.alpha, nan = 0., posinf = 0., neginf = 0.)
+    
+    def logpdf_observed(self, x):
+        """
+        logpdf of the observed distribution
+        
+        Arguments:
+            np.ndarray x: point to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: mixture.logpdf(x)
+        """
+        if self.selfunc is None or not self.hierarchical:
+            return self.mixture.logpdf(x)
+        else:
+            with np.errstate(divide = 'ignore', invalid = 'ignore'):
+                return np.nan_to_num(self.mixture.logpdf(x) + np.log(self.selfunc(x)) + np.log(self.alpha), nan = -np.inf, posinf = -np.inf)
 
 class par_model:
     """
@@ -122,6 +214,18 @@ class par_model:
             np.ndarray: p_intr.pdf(x)*p_obs(x)/norm
         """
         return self.model(x, *self.pars)
+
+    def logpdf(self, x):
+        """
+        logpdf of the observed distribution
+        
+        Arguments:
+            np.ndarray x: point to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: p_intr.logpdf(x)
+        """
+        return np.log(self.model(x, *self.pars))
     
     @_selfunc
     def pdf_observed(self, x):
@@ -180,7 +284,6 @@ class het_mixture:
         np.ndarray bounds:        bounds (FIGARO)
         bool augment:             whether the model includes a non-parametric augmentation
         callable selfunc:         selection function
-        int n_draws:              number of draws for normalisation
         int n_shared_pars:        number of shared parameters among models
         
     Returns:
@@ -192,7 +295,6 @@ class het_mixture:
                        augment,
                        hierarchical,
                        selfunc       = None,
-                       n_draws       = 1e4,
                        n_shared_pars = 0,
                        ):
         # Components
@@ -203,21 +305,29 @@ class het_mixture:
         self.dim           = len(self.bounds)
         self.augment       = augment
         self.selfunc       = selfunc
-        self.n_draws       = int(n_draws)
         self.n_shared_pars = int(n_shared_pars)
         # Weights and normalisation
-        if self.selfunc is not None and not self.hierarchical:
-            self.intrinsic_weights = [wi/mi.alpha for wi, mi in zip(self.weights[self.augment:], self.models[self.augment:])]
-            if self.augment:
-                if isinstance(self.models[0], mixture):
-                    self.intrinsic_weights = [self.weights[0]*np.mean(1./self.selfunc(self.models[0].rvs(self.n_draws)))] + self.intrinsic_weights
-                else:
-                    self.intrinsic_weights = [self.weights[0]*np.mean(1./self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (self.n_draws, len(self.bounds)))))] + self.intrinsic_weights
-            self.intrinsic_weights = np.array(self.intrinsic_weights/np.sum(self.intrinsic_weights))
-            self.norm_intrinsic    = np.sum(self.intrinsic_weights[self.augment:])
+        if self.selfunc is not None:
+            if not self.hierarchical:
+                self.intrinsic_weights = [wi/mi.alpha for wi, mi in zip(self.weights[self.augment:], self.models[self.augment:])]
+                if self.augment:
+                    self.intrinsic_weights = [self.weights[0]*self.models[0].alpha] + self.intrinsic_weights
+                self.intrinsic_weights = np.array(self.intrinsic_weights/np.sum(self.intrinsic_weights))
+                self.observed_weights  = self.weights
+            else:
+                self.intrinsic_weights = self.weights
+                self.observed_weights  = np.array([wi*mi.alpha for wi, mi in zip(self.weights, self.models)])
+                self.observed_weights /= np.sum(self.observed_weights)
         else:
             self.intrinsic_weights = self.weights
-            self.norm_intrinsic    = 1.
+            self.observed_weights  = self.weights
+        self.log_intrinsic_weights = np.log(self.intrinsic_weights)
+        self.log_observed_weights  = np.log(self.observed_weights)
+        # Parametric models only
+        self.parametric_weights     = self.intrinsic_weights[self.augment:]
+        self.log_parametric_weights = np.log(self.parametric_weights)
+        self.norm_parametric        = np.sum(self.parametric_weights)
+        self.log_norm_parametric    = np.log(self.norm_parametric)
         if self.augment:
             self.probit = self.models[0].probit
         else:
@@ -236,7 +346,7 @@ class het_mixture:
         Returns:
             np.ndarray: het_mixture.pdf(x)
         """
-        return np.array([wi*mi.pdf(x)/self.norm_intrinsic for wi, mi in zip(self.intrinsic_weights, self.models[(self.augment and not self.hierarchical):])]).sum(axis = 0)
+        return np.array([wi*mi.pdf(x) for wi, mi in zip(self.intrinsic_weights, self.models)]).sum(axis = 0)
     
     def logpdf(self, x):
         """
@@ -248,7 +358,7 @@ class het_mixture:
         Returns:
             np.ndarray: het_mixture.logpdf(x)
         """
-        return np.log(self.pdf(x))
+        return np.array([wi+mi.logpdf(x) for wi, mi in zip(self.log_intrinsic_weights, self.models)]).sum(axis = 0)
 
     def pdf_observed(self, x):
         """
@@ -260,9 +370,7 @@ class het_mixture:
         Returns:
             np.ndarray: het_mixture.pdf(x)
         """
-        if self.hierarchical:
-            raise ANUBISException("Observed distribution not available for hierarchical reconstructions")
-        return np.array([wi*mi.pdf_observed(x) for wi, mi in zip(self.weights, self.models)]).sum(axis = 0)
+        return np.array([wi*mi.pdf_observed(x) for wi, mi in zip(self.observed_weights, self.models)]).sum(axis = 0)
     
     def logpdf_observed(self, x):
         """
@@ -274,9 +382,31 @@ class het_mixture:
         Returns:
             np.ndarray: het_mixture.logpdf(x)
         """
-        if self.hierarchical:
-            raise ANUBISException("Observed distribution not available for hierarchical reconstructions")
-        return np.log(self.pdf_observed(x))
+        return np.array([wi+mi.logpdf(x) for wi, mi in zip(self.log_observed_weights, self.models)]).sum(axis = 0)
+    
+    def pdf_parametric(self, x):
+        """
+        Evaluate mixture at point(s) x (parametric models only)
+        
+        Arguments:
+            np.ndarray x: point(s) to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: het_mixture.pdf(x)
+        """
+        return np.array([wi*mi.pdf(x)/self.norm_parametric for wi, mi in zip(self.parametric_weights, self.models[self.augment:])]).sum(axis = 0)
+
+    def logpdf_parametric(self, x):
+        """
+        Evaluate log mixture at point(s) x (parametric models only)
+        
+        Arguments:
+            np.ndarray x: point(s) to evaluate the mixture at
+        
+        Returns:
+            np.ndarray: het_mixture.logpdf(x)
+        """
+        return np.array([wi+mi.logpdf(x)-self.log_norm_parametric for wi, mi in zip(self.log_parametric_weights, self.models[self.augment:])]).sum(axis = 0)
 
 #-----------------#
 # Inference class #
@@ -624,10 +754,10 @@ class HMM:
         # Non-parametric model (if required)
         if self.augment:
             if self.nonpar.n_pts == 0:
-                models = [uniform(self.bounds, self.probit)] + par_models
+                nonpar = uniform(self.bounds, self.probit)
             else:
                 nonpar = self.nonpar.build_mixture()
-                models = [nonpar] + par_models
+            models = [nonpar_model(nonpar, self.hierarchical, self.selfunc)] + par_models
         else:
             models = par_models
         # Number of shared parameters
@@ -635,7 +765,14 @@ class HMM:
             n_shared_pars = len(self.shared_par_bounds)
         else:
             n_shared_pars = 0
-        return het_mixture(models, dirichlet(self.n_pts+self.gamma0).rvs()[0], self.bounds, self.augment, selfunc = self.selfunc, n_shared_pars = n_shared_pars, hierarchical = self.hierarchical)
+        if self.selfunc and self.hierarchical:
+            alphas = [m.alpha for m in par_models]
+            if self.augment:
+                alphas = [nonpar.alpha_factor] + alphas
+            n_pts = self.n_pts/np.array(alphas)
+        else:
+            n_pts = self.n_pts
+        return het_mixture(models, dirichlet(n_pts+self.gamma0).rvs()[0], self.bounds, self.augment, selfunc = self.selfunc, n_shared_pars = n_shared_pars, hierarchical = self.hierarchical)
         
 class HierHMM(HMM):
     """
