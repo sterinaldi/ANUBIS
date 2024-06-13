@@ -1,14 +1,15 @@
 import numpy as np
-import dill
+import json
 import warnings
 from pathlib import Path
-from figaro.load import load_data as load_data_figaro, load_density as load_density_figaro
+from figaro.load import load_data as load_data_figaro, load_density as load_density_figaro, save_density as save_density_figaro
 from anubis.utils import get_samples_and_weights, get_labels
 from anubis.exceptions import ANUBISException
+from anubis.mixture import het_mixture, par_model, nonpar_model
 
-def save_density(draws, folder = '.', name = 'density', pars_labels = None, par_models_labels = None):
+def save_density(draws, models, folder = '.', name = 'density'):
     """
-    Exports a list of anubis.het_mixture instances and the corresponding samples to file
+    Exports a list of anubis.mixture.het_mixture instances and the corresponding samples to file
 
     Arguments:
         :list draws:                   list of mixtures to be saved
@@ -17,16 +18,31 @@ def save_density(draws, folder = '.', name = 'density', pars_labels = None, par_
         :list-of-str pars_labels:      labels for parameters
         :list-of-str par_model_labels: labels for models (for weights)
     """
-    with open(Path(folder, name+'.pkl'), 'wb') as f:
-        dill.dump(draws, f)
-    # Save samples
     samples = get_samples_and_weights(draws)
-    labels = get_labels(draws, 'txt', pars_labels = pars_labels, par_models_labels = par_models_labels)
+    labels  = get_labels(draws, 'save', models)
+    dict_info = {'augment': draws[0].augment,
+                 'probit': draws[0].probit,
+                 'bounds': draws[0].bounds.tolist(),
+                 'hierarchical': draws[0].hierarchical,
+                 'n_shared_pars': draws[0].n_shared_pars,
+                }
+    # Save samples
     np.savetxt(Path(folder, name+'_samples.txt'), samples, header = ' '.join(labels))
+    # Save mixture info
+    with open(Path(folder, name+'_info.json'), 'w') as f:
+        json.dump(json.dumps(dict_info), f)
+    # Save non-parametric model
+    if draws[0].augment:
+        mixtures = [d.models[0].mixture for d in draws]
+        save_density_figaro(draws, folder, name+'_nonpar', ext = 'json')
+    # Save alpha factors
+    if draws[0].selfunc is not None:
+        alphas = np.array([[m.alpha for m in d.models] for d in draws])
+        np.savetxt(Path(folder, name+'_alphas.txt'), alphas, header = ' '.join(labels[:-len(d.models[0])]))
     
-def load_density(path):
+def load_density(models, selection_function = None, name = 'density', path = '.', make_comp = True):
     """
-    Loads a list of anubis.het_mixture instances from path.
+    Loads a list of anubis.mixture.het_mixture instances from path.
 
     Arguments:
         :str or Path path: path with draws (file or folder)
@@ -35,30 +51,68 @@ def load_density(path):
         :list: anubis.het_mixture object instances
     """
     path = Path(path).resolve()
-    if path.is_file():
-        if not path.parts[-1].split('.')[-1] == 'pkl':
-            path = Path(path, '.pkl')
-        return _load_density_file(path)
-    else:
-        return [_load_density_file(file) for file in path.glob('*.[jp][sk][ol]*')]
-
-def _load_density_file(file):
-    """
-    Loads a list of anubis.het_mixture instances from file.
-
-    Arguments:
-        :str or Path file: file with draws
-
-    Returns
-        :list: anubis.het_mixture object instances
-    """
-    file = Path(file)
+    file_samples = Path(path, name+'_samples.txt')
+    file_info    = Path(path, name+'_info.json')
     try:
-        with open(file, 'rb') as f:
-            draws = dill.load(f)
-        return draws
+        with open(file_info, 'r') as fjson:
+            info = json.loads(json.load(fjson))
+        samples = np.genfromtxt(file_samples, names = True)
+        if info['augment']:
+            file_nonpar  = Path(path, name+'_nonpar.json')
+            nonpar_draws = load_density_figaro(file_nonpar, make_comp = True)
+        if selection_function is not None:
+            file_alphas = Path(path, name+'_alphas.txt')
+            alphas = np.genfromtxt(file_alphas, names = True)
+        else:
+            ai = np.ones(len(models) + augment)
+            alphas = {model['name']: ai for model in models}
+            if info['augment']:
+                alphas['np'] = ai
     except FileNotFoundError:
-            raise ANUBISException("{0} not found. Please provide it or re-run the inference.".format(file.name))
+        raise ANUBISException("{0} files not found. Please provide them or re-run the inference.".format(name))
+    info['bounds'] = np.atleast_2d(info['bounds'])
+    # Join list of parameter names
+    for model in models:
+        try:
+            model['all_par_names'] = np.concatenate((model['par_names'], model['shared_par_names']))
+        except KeyError:
+            model['all_par_names'] = model['par_names']
+        model['samples'] = np.array([samples[l] for l in model['all_par_names']])
+    # Weights
+    weight_labels = ['w_{}'.format(model['name']) for model in models]
+    if info['augment']:
+        weight_labels = ['w_np'] + weight_labels
+    weights = np.array([samples[w] for w in weight_labels])
+    # Build draws
+    draws = []
+    for i in range(len(samples)):
+        mix_models = []
+        if info['augment']:
+            np = nonpar_model(mixture            = nonpar_draws[i],
+                              hierarchical       = info['hierarchical'],
+                              selection_function = selection_function,
+                              )
+            mix_models.append(np)
+        for model in models:
+            m = par_model(model              = model['model'],
+                          pars               = model['samples'][i],
+                          bounds             = info['bounds'],
+                          probit             = info['probit'],
+                          hierarchical       = info['hierarchical'],
+                          selection_function = selection_function,
+                          norm               = alphas[model['name']][i],
+                          )
+            mix_models.append(m)
+        hmix = het_mixture(models        = mix_models,
+                           weights       = weights[i],
+                           bounds        = info['bounds'],
+                           augment       = info['augment'],
+                           hierarchical  = info['hierarchical'],
+                           selfunc       = selection_function,
+                           n_shared_pars = info['n_shared_pars'],
+                           )
+        draws.append(hmix)
+    return draws
 
 def load_data(path_samples, path_mixtures, *args, **kwargs):
     """
