@@ -69,7 +69,7 @@ def get_labels(draws, kind, pars_labels = None, par_models_labels = None):
     if par_models_labels is None or not (len(par_models_labels) == n_par_models):
         weights_labels = ['$w_{'+'{0}'.format(i+1)+'}$' for i in range(n_par_models)]
     else:
-        weights_labels = ['$w_{'+'{0}'.format(l)+'}$' for l in par_models_labels]
+        weights_labels = ['$w_\\mathrm{'+'{0}'.format(l)+'}$' for l in par_models_labels]
     if np.array([d.augment for d in draws]).all():
         weights_labels = ['$w_\\mathrm{np}$'] + weights_labels
     # Decide what to return
