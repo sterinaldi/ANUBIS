@@ -54,10 +54,10 @@ class nonpar_model:
         bool hierarchical:              whether the model comes from a hierarchical inference or not
         callable selfunc:               selection function (if required)
     """
-    def __init__(self, mixture, hierarchical, selfunc = None):
+    def __init__(self, mixture, hierarchical, selection_function = None):
         self.mixture = mixture
         self.hierarchical = hierarchical
-        self.selfunc = selfunc
+        self.selfunc = selection_function
         self.probit = self.mixture.probit
         if self.selfunc is not None:
             if self.hierarchical:
@@ -152,7 +152,7 @@ class par_model:
                        bounds,
                        probit,
                        hierarchical,
-                       selfunc = None,
+                       selection_function = None,
                        norm = None,
                        ):
         self.model        = model
@@ -161,7 +161,7 @@ class par_model:
         self.bounds       = np.atleast_2d(bounds)
         self.dim          = len(self.bounds)
         self.probit       = probit
-        self.selfunc      = selfunc
+        self.selfunc      = selection_function
         if norm is not None:
             self.alpha = norm
         else:
@@ -446,7 +446,7 @@ class HMM:
                        prior_pars         = None,
                        selection_function = None,
                        n_draws_pars       = 1e3,
-                       n_draws_norm       = 1e4,
+                       n_draws_norm       = 5e3,
                        alpha0             = 1.,
                        gamma0             = None,
                        probit             = False,
@@ -666,7 +666,7 @@ class HMM:
         self.stored_pts[int(np.sum(self.n_pts))] = np.atleast_2d(x)
         self._assign_to_component(np.atleast_2d(x), pt_id = int(np.sum(self.n_pts)))
     
-    def density_from_samples(self, samples):
+    def density_from_samples(self, samples, make_comp = True):
         """
         Reconstruct the probability density from a set of samples.
         
@@ -689,7 +689,7 @@ class HMM:
         # Reassign all points once
         for id in range(int(np.sum(self.n_pts))):
             self._reassign_point(int(id))
-        d = self.build_mixture()
+        d = self.build_mixture(make_comp = make_comp)
         self.initialise()
         return d
     
@@ -710,7 +710,7 @@ class HMM:
             self.nonpar._remove_from_cluster(x, self.nonpar.assignations[id_nonpar])
         self._assign_to_component(x, id, id_nonpar = id_nonpar, reassign = True)
     
-    def build_mixture(self):
+    def build_mixture(self, make_comp = True):
         """
         Instances a mixture class representing the inferred distribution
         
@@ -744,7 +744,7 @@ class HMM:
                 else:
                     par_vals = [[] for _ in range(len(self.par_models))]
                 shared_par_vals = self.shared_par_draws[id]
-            par_models = [par_model(m.model, list(par) + list(shared_par_vals), self.bounds, self.probit, hierarchical = True, selfunc = self.selfunc, norm = n) for m, par, n in zip(self.par_models, par_vals, self.norm)]
+            par_models = [par_model(m.model, list(par) + list(shared_par_vals), self.bounds, self.probit, hierarchical = True, selection_function = self.selfunc, norm = n) for m, par, n in zip(self.par_models, par_vals, self.norm)]
             # Renormalise the models in presence of selection effects
             if self.selfunc is not None:
                 [m._compute_alpha_factor([p], [shared_par_vals], self.n_draws_norm) for m, p, n in zip(par_models, par_vals, self.norm) if n is None]
@@ -756,7 +756,7 @@ class HMM:
             if self.nonpar.n_pts == 0:
                 nonpar = uniform(self.bounds, self.probit)
             else:
-                nonpar = self.nonpar.build_mixture()
+                nonpar = self.nonpar.build_mixture(make_comp = make_comp)
             models = [nonpar_model(nonpar, self.hierarchical, self.selfunc)] + par_models
         else:
             models = par_models

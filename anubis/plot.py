@@ -30,7 +30,7 @@ def plot_1d_dist(*args, **kwargs):
     figaro_plot_1d_dist(*args, **kwargs)
 
 # ANUBIS plot functions
-def plot_parametric(draws, injected = None, samples = None, selfunc = None, bounds = None, out_folder = '.', name = 'parametric', n_pts = 1000, label = None, unit = None, show = False, save = True, subfolder = False, true_value = None, true_value_label = '\mathrm{True\ value}', injected_label = '\mathrm{Simulated}', median_label = '\mathrm{Parametric}', logx = False, logy = False):
+def plot_parametric(draws, injected = None, samples = None, bounds = None, out_folder = '.', name = 'parametric', n_pts = 1000, label = None, unit = None, show = False, save = True, subfolder = False, true_value = None, true_value_label = '\mathrm{True\ value}', injected_label = '\mathrm{Simulated}', median_label = '\mathrm{Parametric}', logx = False, logy = False):
     """
     Plot the parametric distribution along with samples from the true distribution (if available).
     Works with 1-dimensional distributions only.
@@ -39,7 +39,6 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
         :iterable draws:                  container for realisations
         :callable or np.ndarray injected: injected distribution (if available)
         :np.ndarray samples:              samples from the true distribution (if available)
-        :callable or np.ndarray selfunc:  selection function (if available)
         :iterable bounds:                 bounds for the recovered distribution. If None, bounds from mixture instances are used.
         :str or Path out_folder:          output folder
         :str name:                        name to be given to outputs
@@ -97,7 +96,7 @@ def plot_parametric(draws, injected = None, samples = None, selfunc = None, boun
                         logy             = logy,
                         )
 
-def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, bounds = None, out_folder = '.', name = 'nonparametric', n_pts = None, labels = None, units = None, hierarchical = False, show = False, save = True, subfolder = False, true_value = None, true_value_label = '\mathrm{True\ value}', injected_label = '\mathrm{Simulated}', levels = [0.5, 0.68, 0.9], scatter_points = False):
+def plot_non_parametric(draws, injected = None, samples = None, bounds = None, out_folder = '.', name = 'nonparametric', n_pts = None, labels = None, units = None, hierarchical = False, show = False, save = True, subfolder = False, true_value = None, true_value_label = '\mathrm{True\ value}', injected_label = '\mathrm{Simulated}', levels = [0.5, 0.68, 0.9], scatter_points = False):
     """
     Plot the recovered non-parametric distribution along with samples from the true distribution (if available).
     
@@ -105,7 +104,6 @@ def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, 
         :iterable draws:                  container for mixture instances
         :callable or np.ndarray injected: injected distribution (if available, only for 1D distribution)
         :np.ndarray samples:              samples from the true distribution (if available)
-        :callable or np.ndarray selfunc:  selection function (if available)
         :iterable bounds:                 bounds for the recovered distribution. If None, bounds from mixture instances are used.
         :str or Path out_folder:          output folder
         :str name:                        name to be given to outputs
@@ -134,7 +132,6 @@ def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, 
         figaro_plot_median_cr(draws            = nonpar,
                               injected         = injected,
                               samples          = samples,
-                              selfunc          = selfunc,
                               bounds           = bounds,
                               out_folder       = out_folder,
                               name             = name,
@@ -171,7 +168,7 @@ def plot_non_parametric(draws, injected = None, samples = None, selfunc = None, 
                       scatter_points = scatter_points,
                       )
 
-def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, par_models_labels = None, true_pars = None, true_weights = None, name = None):
+def plot_samples(draws, plot = 'joint', out_folder = '.', models = None, true_pars = None, true_weights = None, name = None, subfolder = False):
     """
     Corner plot with samples (parameters, weights and/or both).
     
@@ -196,9 +193,16 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
             true_pars = list(true_pars)
     
     out_folder = Path(out_folder)
-    if not out_folder.exists():
-        out_folder.mkdir()
-        
+    out_folder.mkdir(exists_ok = True)
+    if subfolder:
+        out_folder = Path(out_folder, 'density')
+        if not out_folder.exists():
+            try:
+                out_folder.mkdir()
+            except FileExistsError:
+                # Avoids issue with parallelisation
+                pass
+
     if plot in ['pars', 'all']:
         samples = get_samples(draws)
         if name is not None:
@@ -206,7 +210,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
         else:
             plot_name = 'parameters.pdf'
         
-        parameter_labels = get_labels(draws, 'pars', pars_labels = pars_labels)
+        parameter_labels = get_labels(draws, 'pars', models)
         c = corner(samples, labels = parameter_labels, truths = true_pars, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
         c.savefig(Path(out_folder, plot_name), bbox_inches = 'tight')
         plt.close(c)
@@ -218,7 +222,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
         else:
             plot_name = 'weights.pdf'
         
-        weights_labels = get_labels(draws, 'weights', par_models_labels = par_models_labels)
+        weights_labels = get_labels(draws, 'weights', models)
         c = corner(samples, labels = weights_labels, truths = true_weights, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
         c.savefig(Path(out_folder, plot_name), bbox_inches = 'tight')
         plt.close(c)
@@ -230,9 +234,9 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', pars_labels = None, pa
         else:
             plot_name = 'joint.pdf'
 
-        joint_labels = get_labels(draws, 'joint', pars_labels = pars_labels, par_models_labels = par_models_labels)
+        joint_labels = get_labels(draws, 'joint', models = models)
         if true_pars is None:
-            true_pars = [None for _ in range(len(pars_labels))]
+            true_pars = [None for _ in range(len(joint_labels) - len(models) - draws[0].augment)]
         if true_weights is None:
             true_weights = [None for _ in range(len(weights_labels))]
         true_vals = true_pars + true_weights

@@ -8,7 +8,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ['anubis']
+packages = ['anubis', 'anubis._pipelines']
 
 [project]
 name = 'anubis'
@@ -50,3 +50,7 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/sterinaldi/ANUBIS.git"
 Issues = "https://github.com/sterinaldi/ANUBIS/issues"
+
+[project.scripts]
+anubis-density          = "anubis._pipelines.probability_density:main"
+

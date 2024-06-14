@@ -1,6 +1,7 @@
 import numpy as np
 import json
 import warnings
+import importlib
 from pathlib import Path
 from figaro.mixture import mixture
 from figaro.load import load_data as load_data_figaro, save_density as save_density_figaro
@@ -45,19 +46,19 @@ def save_density(draws, models, folder = '.', name = 'density'):
             model_names = ['np'] + model_names
         np.savetxt(Path(folder, name+'_alphas.txt'), alphas, header = ' '.join(model_names))
     
-def load_density(path, name, models, selection_function = None, make_comp = True):
+def load_density(folder, name, models, selection_function = None, make_comp = True):
     """
     Loads a list of anubis.mixture.het_mixture instances from path.
 
     Arguments:
-        :str or Path path: path with draws (file or folder)
+        :str or Path folder: path with draws (file or folder)
 
     Returns
         :list: anubis.het_mixture object instances
     """
     # Reimport numpy (issues with try/except)
     import numpy as np
-    path = Path(path).resolve()
+    path = Path(folder).resolve()
     file_samples = Path(path, name+'_samples.txt')
     file_info    = Path(path, name+'_info.json')
     try:
@@ -184,3 +185,106 @@ def load_data(path_samples, path_mixtures, *args, **kwargs):
         warnings.simplefilter("ignore", category=UserWarning)
         mixtures = [load_density_figaro(Path(path_mixtures, 'draws_'+ev+'.json'), make_comp = False) for ev in names]
     return [[ss, mm] for ss, mm in zip(samples, mixtures)], names
+
+def load_models(file_models):
+    """
+    Load a list of dictionaries with parametric models
+    
+    Arguments:
+        str or Path file_models: path to file with models definition
+    
+    Returns:
+        list-of-dict models: list of dictionaries storing models
+        
+    """
+    file_models      = Path(file_models)
+    models_file_name = file_models.parts[-1].split('.')[0]
+    spec             = importlib.util.spec_from_file_location(models_file_name, file_models)
+    models_module    = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(models_module)
+    try:
+        models = models_module.models
+    except ImportError:
+        raise ANUBISException("Please include in your module a list of dicts named 'models'")
+    all_par_names  = []
+    all_parameters = []
+    all_bounds     = []
+    for model in models:
+        if ('parameters' in model.keys()) and ('par_bounds' in model.keys()):
+            raise ANUBISException("Please provide either parameter values or parameter bounds for the model {}".format(model['name']))
+        if 'par_names' in model.keys():
+            all_par_names.append(model['par_names'])
+        else:
+            all_par_names.append([])
+        if 'parameters' in model.keys():
+            all_parameters.append(model['parameters'])
+        else:
+            all_parameters.append([])
+        if 'par_bounds' in model.keys():
+            all_bounds.append(model['par_bounds'])
+        else:
+            all_bounds.append([])
+    # Find shared parameters to infer
+    flatten_names  = [name for names in all_par_names for name in names]
+    flatten_bounds = [tuple(bounds) for par_bounds in all_bounds for bounds in par_bounds]
+    # Identify items appearing once
+    d_names = {}
+    for i in flatten_names: d_names[i] = i in d_names
+    set_names         = list(dict.fromkeys(flatten_names).keys())
+    set_bounds        = list(dict.fromkeys(flatten_bounds).keys())
+    unique_names      = [k for k in flatten_names if not d_names[k]]
+    shared_par_bounds = [list(x) for x, k in zip(set_bounds, set_names) if d_names[k]]
+    # Build list of unique bounds to return
+    par_bounds = []
+    for model in models:
+        if 'par_names' in model.keys():
+            par_bounds.append([bounds for bounds, par_name in zip(model['par_bounds'], model['par_names']) if par_name in unique_names])
+        else:
+            par_bounds.append(None)
+    if np.all([b is None for b in par_bounds]):
+        par_bounds = None
+    if len(shared_par_bounds) == 0:
+        shared_par_bounds = None
+    # Fixed parameters appearing once
+    flatten_pars  = [par for pars in all_parameters for par in pars]
+    # Identify items appearing once
+    d_pars = {}
+    for i in flatten_pars: d_pars[i] = i in d_pars
+    set_pars    = list(dict.fromkeys(flatten_pars).keys())
+    unique_pars = [k for k in flatten_pars if not d_pars[k]]
+    shared_pars = [k for k in set_pars if d_pars[k]]
+    # Build list of unique bounds to return
+    pars = []
+    for model in models:
+        if 'parameters' in model.keys():
+            pars.append([par for par in model['parameters'] if par in unique_pars])
+        else:
+            pars.append([])
+    return models, pars, shared_pars, par_bounds, shared_par_bounds
+
+def load_injected_density(file_density):
+    """
+    Load injected density (including parametric and residual non-parametric, if available)
+    
+    Arguments:
+        str or Path file_density: file with injected densities
+    
+    Returns:
+        callable: injected density
+        callable: parametric part, if available
+        callable: residual part to be accounted for by the non-parametric method
+    """
+    inj_file_name = Path(file_density).parts[-1].split('.')[0]
+    spec = importlib.util.spec_from_file_location(inj_file_name, options.inj_density_file)
+    inj_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inj_module)
+    inj_density = inj_module.density
+    try:
+        inj_parametric = inj_module.density_parametric
+    except ImportError:
+        inj_parametric = None
+    try:
+        inj_non_parametric = inj_module.density_non_parametric
+    except ImportError:
+        inj_non_parametric = None
+    return inj_density, inj_parametric, inj_non_parametric

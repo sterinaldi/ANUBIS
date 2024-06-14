@@ -52,11 +52,17 @@ def get_labels(draws, kind, models = None):
         :list-of-str: labels
     """
     if models is not None:
+        # Check that all models have the correct attributes
+        for model in models:
+            if 'par_names' not in model.keys() or 'parameters' in model.keys():
+                model['par_names'] = []
+            if 'par_labels' not in model.keys() or 'parameters' in model.keys():
+                model['par_labels'] = []
         all_pars_names  = [lab for model in models for lab in model['par_names']]
         all_pars_labels = [lab for model in models for lab in model['par_labels']]
         # Fancy way of getting all unique instances while preserving order
         unique_names  = list(dict.fromkeys(all_pars_names).keys())
-        unique_labels = list(dict.fromkeys(all_pars_names).keys())
+        unique_labels = list(dict.fromkeys(all_pars_labels).keys())
         # Identify items appearing once
         d_names = {}
         for i in all_pars_names: d_names[i] = i in d_names
@@ -92,7 +98,7 @@ def get_labels(draws, kind, models = None):
         return parameter_labels + weights_labels
     elif kind == 'save':
         # Remove LaTeX characters from string
-        labels = par_names + [s.translate(str.maketrans({st:'' for st in '$\{}'})) for s in weights_labels]
+        labels = pars_names + [s.translate(str.maketrans({st:'' for st in '$\{}'})) for s in weights_labels]
         labels = [s.replace('mathrm', '') for s in labels]
         return labels
     else:
