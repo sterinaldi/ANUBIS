@@ -2,10 +2,11 @@ import numpy as np
 import json
 import warnings
 from pathlib import Path
-from figaro.load import load_data as load_data_figaro, load_density as load_density_figaro, save_density as save_density_figaro
+from figaro.mixture import mixture
+from figaro.load import load_data as load_data_figaro, save_density as save_density_figaro
 from anubis.utils import get_samples_and_weights, get_labels
 from anubis.exceptions import ANUBISException
-from anubis.mixture import het_mixture, par_model, nonpar_model
+from anubis.mixture import het_mixture, par_model, nonpar_model, uniform
 
 def save_density(draws, models, folder = '.', name = 'density'):
     """
@@ -20,11 +21,12 @@ def save_density(draws, models, folder = '.', name = 'density'):
     """
     samples = get_samples_and_weights(draws)
     labels  = get_labels(draws, 'save', models)
-    dict_info = {'augment': draws[0].augment,
-                 'probit': draws[0].probit,
-                 'bounds': draws[0].bounds.tolist(),
-                 'hierarchical': draws[0].hierarchical,
-                 'n_shared_pars': draws[0].n_shared_pars,
+    dict_info = {'augment':            draws[0].augment,
+                 'probit':             draws[0].probit,
+                 'bounds':             draws[0].bounds.tolist(),
+                 'hierarchical':       draws[0].hierarchical,
+                 'n_shared_pars':      draws[0].n_shared_pars,
+                 'selection_function': draws[0].selfunc is not None
                 }
     # Save samples
     np.savetxt(Path(folder, name+'_samples.txt'), samples, header = ' '.join(labels))
@@ -34,13 +36,16 @@ def save_density(draws, models, folder = '.', name = 'density'):
     # Save non-parametric model
     if draws[0].augment:
         mixtures = [d.models[0].mixture for d in draws]
-        save_density_figaro(draws, folder, name+'_nonpar', ext = 'json')
+        save_density_figaro(mixtures, folder, name+'_nonpar', ext = 'json')
     # Save alpha factors
     if draws[0].selfunc is not None:
         alphas = np.array([[m.alpha for m in d.models] for d in draws])
-        np.savetxt(Path(folder, name+'_alphas.txt'), alphas, header = ' '.join(labels[:-len(d.models[0])]))
+        model_names = [m['name'] for m in models]
+        if draws[0].augment:
+            model_names = ['np'] + model_names
+        np.savetxt(Path(folder, name+'_alphas.txt'), alphas, header = ' '.join(model_names))
     
-def load_density(models, selection_function = None, name = 'density', path = '.', make_comp = True):
+def load_density(path, name, models, selection_function = None, make_comp = True):
     """
     Loads a list of anubis.mixture.het_mixture instances from path.
 
@@ -50,6 +55,8 @@ def load_density(models, selection_function = None, name = 'density', path = '.'
     Returns
         :list: anubis.het_mixture object instances
     """
+    # Reimport numpy (issues with try/except)
+    import numpy as np
     path = Path(path).resolve()
     file_samples = Path(path, name+'_samples.txt')
     file_info    = Path(path, name+'_info.json')
@@ -59,30 +66,30 @@ def load_density(models, selection_function = None, name = 'density', path = '.'
         samples = np.genfromtxt(file_samples, names = True)
         if info['augment']:
             file_nonpar  = Path(path, name+'_nonpar.json')
-            nonpar_draws = load_density_figaro(file_nonpar, make_comp = True)
+            nonpar_draws = load_density_nonparametric(file_nonpar, make_comp = True)
         if selection_function is not None:
             file_alphas = Path(path, name+'_alphas.txt')
             alphas = np.genfromtxt(file_alphas, names = True)
         else:
-            ai = np.ones(len(models) + augment)
+            ai = np.ones(len(models) + info['augment'])
             alphas = {model['name']: ai for model in models}
             if info['augment']:
                 alphas['np'] = ai
     except FileNotFoundError:
         raise ANUBISException("{0} files not found. Please provide them or re-run the inference.".format(name))
+    if info['selection_function'] and selection_function is None:
+        raise ANUBISException("This inference was run with a selection function. Please provide it.")
+    if not info['selection_function'] and selection_function is not None:
+        print("Selection function ignored.")
     info['bounds'] = np.atleast_2d(info['bounds'])
     # Join list of parameter names
     for model in models:
-        try:
-            model['all_par_names'] = np.concatenate((model['par_names'], model['shared_par_names']))
-        except KeyError:
-            model['all_par_names'] = model['par_names']
-        model['samples'] = np.array([samples[l] for l in model['all_par_names']])
+        model['samples'] = np.array([samples[l] for l in model['par_names']]).T
     # Weights
     weight_labels = ['w_{}'.format(model['name']) for model in models]
     if info['augment']:
         weight_labels = ['w_np'] + weight_labels
-    weights = np.array([samples[w] for w in weight_labels])
+    weights = np.array([samples[w] for w in weight_labels]).T
     # Build draws
     draws = []
     for i in range(len(samples)):
@@ -112,6 +119,40 @@ def load_density(models, selection_function = None, name = 'density', path = '.'
                            n_shared_pars = info['n_shared_pars'],
                            )
         draws.append(hmix)
+    return draws
+
+def load_density_nonparametric(file, make_comp = True):
+    """
+    Loads a list of figaro.mixture.mixture or anubis.mixture.uniform instances from json file
+
+    Arguments:
+        str or Path file: file with draws
+        bool make_comp:   make component objects
+
+    Returns
+        list: figaro.mixture object instances
+    """
+    with open(Path(file), 'r') as fjson:
+        dictjson = json.loads(json.load(fjson))[0]
+    draws = []
+    for dict_ in dictjson:
+        mix = False
+        if 'log_w' in dict_.keys():
+            dict_.pop('log_w')
+            mix = True
+        for key in dict_.keys():
+            value = dict_[key]
+            if isinstance(value, list):
+                dict_[key] = np.array(value)
+            if key == 'probit':
+                dict_[key] = bool(value)
+            if key == 'bounds':
+                dict_[key] = np.atleast_2d(value)
+        if mix:
+            instance = mixture(**dict_, make_comp = make_comp)
+        else:
+            instance = uniform(dict_['bounds'], dict_['probit'])
+        draws.append(instance)
     return draws
 
 def load_data(path_samples, path_mixtures, *args, **kwargs):
