@@ -92,7 +92,9 @@ def main():
     parser.add_option("--exclude_points", dest = "exclude_points", action = 'store_true', help = "Exclude points outside bounds from analysis", default = False)
     parser.add_option("--cosmology", type = "choice", dest = "cosmology", help = "Set of cosmological parameters. Default values from Planck (2021)", choices = ['Planck18', 'Planck15'], default = 'Planck18')
     parser.add_option("--sigma_prior", dest = "sigma_prior", type = "string", help = "Expected standard deviation (prior) - single value or n-dim values. If None, it is estimated from samples", default = None)
-    parser.add_option("--n_reassignment", dest = "n_reassignment", type = "float", help = "Number of reassignments", default = None)
+    parser.add_option("--n_reassignments", dest = "n_reassignments", type = "float", help = "Number of reassignments", default = None)
+    parser.add_option("--symbol", type = "string", dest = "symbol", help = "LaTeX-style quantity symbol, for plotting purposes", default = None)
+    parser.add_option("--unit", type = "string", dest = "unit", help = "LaTeX-style quantity unit, for plotting purposes", default = None)
     parser.add_option("--fraction", dest = "fraction", type = "float", help = "Fraction of samples standard deviation for sigma prior. Overrided by sigma_prior.", default = None)
     parser.add_option("--snr_threshold", dest = "snr_threshold", type = "float", help = "SNR threshold for simulated GW datasets", default = None)
     parser.add_option("--far_threshold", dest = "far_threshold", type = "float", help = "FAR threshold for simulated GW datasets", default = None)
@@ -100,8 +102,8 @@ def main():
     parser.add_option("--config", dest = "config", type = "string", help = "Config file. Warning: command line options override config options", default = None)
     parser.add_option("-l", "--likelihood", dest = "likelihood", action = 'store_true', help = "Resample posteriors to get likelihood samples (only for GW data)", default = False)
     parser.add_option("--n_parallel", dest = "n_parallel", type = "int", help = "Number of parallel threads", default = 1)
-    parser.add_option("--mc_draws_pars", dest = "mc_draws_pars", type = "int", help = "Number of draws for assignment MC integral over model parameters", default = None)
-    parser.add_option("--mc_draws_norm", dest = "mc_draws_norm", type = "int", help = "Number of draws for MC normalisation integral", default = None)
+    parser.add_option("--mc_draws_pars", dest = "MC_draws_pars", type = "int", help = "Number of draws for assignment MC integral over model parameters", default = None)
+    parser.add_option("--mc_draws_norm", dest = "MC_draws_norm", type = "int", help = "Number of draws for MC normalisation integral", default = None)
     parser.add_option("--gamma0", dest = "gamma0", type = "float", help = "concentration parameter for Dirichlet prior on augmented mixture", default = None)
 
     (options, args) = parser.parse_args()
@@ -249,7 +251,7 @@ def main():
             plot_median_cr(draws,
                            samples    = samples,
                            injected   = inj_density,
-                           bounds     = options.bounds,
+                           bounds     = options.bounds[0],
                            out_folder = options.output,
                            name       = 'full_density_'+name,
                            label      = options.symbol,
@@ -266,15 +268,15 @@ def main():
                             unit       = options.unit,
                             subfolder  = subfolder,
                             )
+        # Symbols
+        if options.symbol is not None:
+            symbols = options.symbol.split(',')
         else:
-            if options.symbol is not None:
-                symbols = options.symbol.split(',')
-            else:
-                symbols = options.symbol
-            if options.unit is not None:
-                units = options.unit.split(',')
-            else:
-                units = options.unit
+            symbols = options.symbol
+        if options.unit is not None:
+            units = options.unit.split(',')
+        else:
+            units = options.unit
         if options.augment:
             plot_non_parametric(draws,
                                 injected   = inj_non_parametric,
