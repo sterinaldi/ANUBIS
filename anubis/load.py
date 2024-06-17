@@ -72,7 +72,7 @@ def load_density(folder, name, models, selection_function = None, make_comp = Tr
             file_alphas = Path(path, name+'_alphas.txt')
             alphas = np.genfromtxt(file_alphas, names = True)
         else:
-            ai = np.ones(len(models) + info['augment'])
+            ai = np.ones(len(samples))
             alphas = {model['name']: ai for model in models}
             if info['augment']:
                 alphas['np'] = ai
@@ -275,7 +275,7 @@ def load_injected_density(file_density):
         callable: residual part to be accounted for by the non-parametric method
     """
     inj_file_name = Path(file_density).parts[-1].split('.')[0]
-    spec = importlib.util.spec_from_file_location(inj_file_name, options.inj_density_file)
+    spec = importlib.util.spec_from_file_location(inj_file_name, file_density)
     inj_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(inj_module)
     inj_density = inj_module.density

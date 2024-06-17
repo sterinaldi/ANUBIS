@@ -59,6 +59,9 @@ def plot_parametric(draws, injected = None, samples = None, bounds = None, out_f
         warnings.warn("The plot_parametric() method works with 1-dimensional distributions only. No plot produced.")
         return
     
+    if len(np.shape(bounds)) > 1:
+        bounds = bounds[0]
+    
     all_bounds = np.atleast_2d([d.bounds[0] for d in draws])
     x_min = np.max(all_bounds[:,0])
     x_max = np.min(all_bounds[:,1])
@@ -132,7 +135,7 @@ def plot_non_parametric(draws, injected = None, samples = None, bounds = None, o
         figaro_plot_median_cr(draws            = nonpar,
                               injected         = injected,
                               samples          = samples,
-                              bounds           = bounds,
+                              bounds           = bounds[0],
                               out_folder       = out_folder,
                               name             = name,
                               n_pts            = n_pts,
@@ -193,7 +196,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', models = None, true_pa
             true_pars = list(true_pars)
     
     out_folder = Path(out_folder)
-    out_folder.mkdir(exists_ok = True)
+    out_folder.mkdir(exist_ok = True)
     if subfolder:
         out_folder = Path(out_folder, 'density')
         if not out_folder.exists():
