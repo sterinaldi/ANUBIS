@@ -445,8 +445,8 @@ class HMM:
                        shared_par_bounds  = None,
                        prior_pars         = None,
                        selection_function = None,
-                       n_draws_pars       = 1e3,
-                       n_draws_norm       = 5e3,
+                       n_draws_pars       = None,
+                       n_draws_norm       = None,
                        alpha0             = 1.,
                        gamma0             = None,
                        probit             = False,
@@ -469,7 +469,10 @@ class HMM:
             shared_pars = []
         if par_bounds is not None:
             self.par_bounds = [np.atleast_2d(pb) if pb is not None else None for pb in par_bounds]
-            self.n_draws_pars = int(n_draws_pars)
+            if n_draws_pars is not None:
+                self.n_draws_pars = int(n_draws_pars)
+            else:
+                self.n_draws_pars = int(1e3)
         else:
             self.par_bounds = None
         if shared_par_bounds is not None:
@@ -478,12 +481,15 @@ class HMM:
         else:
             self.shared_par_bounds = None
         if self.selfunc is not None:
-            self.n_draws_norm = int(n_draws_norm)
+            if self.n_draws_norm is not None:
+                self.n_draws_norm = int(n_draws_norm)
+            else:
+                self.n_draws_norm = int(5e3)
         if norm is None:
             self.norm   = [None for _ in models]
         else:
             self.norm   = norm
-        self.par_models = [par_model(mod, list(p) + list(shared_pars), bounds, probit, hierarchical = False, selfunc = self.selfunc, norm = n) for mod, p, n in zip(models, pars, self.norm)]
+        self.par_models = [par_model(mod, list(p) + list(shared_pars), bounds, probit, hierarchical = False, selection_function = self.selfunc, norm = n) for mod, p, n in zip(models, pars, self.norm)]
         # DPGMM initialisation (if required)
         if self.augment:
             self.nonpar = DPGMM(bounds     = bounds,
