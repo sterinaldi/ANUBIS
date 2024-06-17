@@ -4,6 +4,7 @@ from scipy.stats import dirichlet
 from anubis.exceptions import ANUBISException
 from figaro.mixture import DPGMM, HDPGMM, mixture, _update_alpha
 from figaro.decorators import probit
+from figaro.transform import transform_to_probit
 from figaro.utils import rejection_sampler
 from figaro._likelihood import evaluate_mixture_MC_draws, evaluate_mixture_MC_draws_1d
 from figaro._numba_functions import logsumexp_jit
@@ -481,7 +482,7 @@ class HMM:
         else:
             self.shared_par_bounds = None
         if self.selfunc is not None:
-            if self.n_draws_norm is not None:
+            if n_draws_norm is not None:
                 self.n_draws_norm = int(n_draws_norm)
             else:
                 self.n_draws_norm = int(5e3)
@@ -539,10 +540,11 @@ class HMM:
         Arguments:
             iterable prior_pars: NIW prior parameters (k, L, nu, mu) for the DPGMM. If None, old parameters are kept
         """
-        self.n_pts        = np.zeros(self.n_components)
-        self.weights      = self.gamma0/np.sum(self.gamma0)
-        self.stored_pts   = {}
-        self.assignations = {}
+        self.n_pts             = np.zeros(self.n_components)
+        self.weights           = self.gamma0/np.sum(self.gamma0)
+        self.stored_pts        = {}
+        self.stored_pts_probit = {}
+        self.assignations      = {}
         # Draw new parameter realisations
         if self.par_bounds is not None or self.shared_par_bounds is not None:
             self.evaluated_logL       = {}
@@ -560,7 +562,7 @@ class HMM:
             self.nonpar.initialise()
             self.ids_nonpar = {}
 
-    def _assign_to_component(self, x, pt_id, id_nonpar = None, reassign = False):
+    def _assign_to_component(self, x, x_probit, pt_id, id_nonpar = None, reassign = False):
         """
         Assign the sample x to an existing cluster or to a new cluster according to the marginal distribution of cluster assignment.
         
@@ -585,7 +587,7 @@ class HMM:
                 self.ids_nonpar[int(pt_id)] = len(list(self.nonpar.stored_pts.keys()))
                 self.nonpar.add_new_point(x)
             else:
-                self._reassign_point_nonpar(x, id_nonpar)
+                self._reassign_point_nonpar(x_probit, id_nonpar)
         # Parameter estimation
         elif self.par_bounds is not None:
             self.evaluated_logL[pt_id] = vals
@@ -669,8 +671,15 @@ class HMM:
         Arguments:
             np.ndarray x: sample
         """
-        self.stored_pts[int(np.sum(self.n_pts))] = np.atleast_2d(x)
-        self._assign_to_component(np.atleast_2d(x), pt_id = int(np.sum(self.n_pts)))
+        x = np.atleast_2d(x)
+        self.stored_pts[int(np.sum(self.n_pts))] = x
+        if self.probit:
+            x_probit = transform_to_probit(x, self.bounds)
+            self.stored_pts_probit[int(np.sum(self.n_pts))] = x_probit
+        else:
+            x_probit = x
+            self.stored_pts_probit[int(np.sum(self.n_pts))] = x
+        self._assign_to_component(x, x_probit, pt_id = int(np.sum(self.n_pts)))
     
     def density_from_samples(self, samples, make_comp = True):
         """
@@ -690,7 +699,7 @@ class HMM:
         for s in samples:
             self.add_new_point(s)
         # Random Gibbs walk (if required)
-        for id in np.random.choice(int(np.sum(self.n_pts)), size = n_reassignments, replace = True):
+        for id in np.random.choice(int(np.sum(self.n_pts)), size = int(n_reassignments), replace = True):
             self._reassign_point(int(id))
         # Reassign all points once
         for id in range(int(np.sum(self.n_pts))):
@@ -707,14 +716,15 @@ class HMM:
             id: sample id
         """
         x                     = self.stored_pts[id]
+        x_probit              = self.stored_pts_probit[id]
         cid                   = self.assignations[id]
         id_nonpar             = None
         self.n_pts[cid]      -= 1
         self.assignations[id] = None
         if self.augment and cid == 0:
             id_nonpar  = self.ids_nonpar[id]
-            self.nonpar._remove_from_cluster(x, self.nonpar.assignations[id_nonpar])
-        self._assign_to_component(x, id, id_nonpar = id_nonpar, reassign = True)
+            self.nonpar._remove_from_cluster(x_probit, self.nonpar.assignations[id_nonpar])
+        self._assign_to_component(x, x_probit, id, id_nonpar = id_nonpar, reassign = True)
     
     def build_mixture(self, make_comp = True):
         """
