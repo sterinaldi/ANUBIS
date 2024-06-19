@@ -241,7 +241,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', models = None, true_pa
         if true_pars is None:
             true_pars = [None for _ in range(len(joint_labels) - len(models) - draws[0].augment)]
         if true_weights is None:
-            true_weights = [None for _ in range(len(weights_labels))]
+            true_weights = [None for _ in range(len(draws[0].models))]
         true_vals = true_pars + true_weights
         
         c = corner(samples, labels = joint_labels, truths = true_vals, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
