@@ -4,7 +4,7 @@ import warnings
 import importlib
 from pathlib import Path
 from figaro.mixture import mixture
-from figaro.load import load_data as load_data_figaro, save_density as save_density_figaro
+from figaro.load import load_data as load_data_figaro, save_density as save_density_figaro, load_density as load_density_figaro
 from anubis.utils import get_samples_and_weights, get_labels
 from anubis.exceptions import ANUBISException
 from anubis.mixture import het_mixture, par_model, nonpar_model, uniform
@@ -281,10 +281,10 @@ def load_injected_density(file_density):
     inj_density = inj_module.density
     try:
         inj_parametric = inj_module.density_parametric
-    except ImportError:
+    except (ImportError, AttributeError):
         inj_parametric = None
     try:
         inj_non_parametric = inj_module.density_non_parametric
-    except ImportError:
+    except (ImportError, AttributeError):
         inj_non_parametric = None
     return inj_density, inj_parametric, inj_non_parametric
