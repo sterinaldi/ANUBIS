@@ -277,7 +277,7 @@ class par_model:
 
 class het_mixture:
     """
-    Class to store a single draw from HMM.
+    Class to store a single draw from AMM.
     
     Arguments:
         list-of-callables models: models in the mixture
@@ -413,7 +413,7 @@ class het_mixture:
 # Inference class #
 #-----------------#
 
-class HMM:
+class AMM:
     """
     Class to infer a distribution given a set of samples.
     
@@ -436,7 +436,7 @@ class HMM:
         np.ndarray norm:            normalisation constant for the parametric observed distributions. Use None if not available
     
     Returns:
-        HMM: instance of HMM class
+        AMM: instance of AMM class
     """
     def __init__(self, models,
                        bounds,
@@ -478,7 +478,10 @@ class HMM:
             self.par_bounds = None
         if shared_par_bounds is not None:
             self.shared_par_bounds = np.atleast_2d(shared_par_bounds)
-            self.n_draws_pars = int(n_draws_pars)
+            if n_draws_pars is not None:
+                self.n_draws_pars = int(n_draws_pars)
+            else:
+                self.n_draws_pars = int(1e3)
         else:
             self.shared_par_bounds = None
         if self.selfunc is not None:
@@ -790,10 +793,10 @@ class HMM:
             n_pts = self.n_pts
         return het_mixture(models, dirichlet(n_pts+self.gamma0).rvs()[0], self.bounds, self.augment, selfunc = self.selfunc, n_shared_pars = n_shared_pars, hierarchical = self.hierarchical)
         
-class HierHMM(HMM):
+class HAMM(AMM):
     """
     Class to infer a distribution given a set of events.
-    Child of HMM class.
+    Child of AMM class.
     
     Arguments:
         list-of-callables:          models
@@ -814,7 +817,7 @@ class HierHMM(HMM):
         np.ndarray norm:            normalisation constant for the parametric observed distributions. Use None if not available
     
     Returns:
-        HierHMM: instance of HierHMM class
+        HAMM: instance of HAMM class
     """
     def __init__(self, models,
                        bounds,
