@@ -154,6 +154,8 @@ class par_model:
                        probit,
                        hierarchical,
                        selection_function = None,
+                       inj_pdf = None,
+                       n_total_inj = None,
                        norm = None,
                        ):
         self.model        = model
@@ -163,6 +165,10 @@ class par_model:
         self.dim          = len(self.bounds)
         self.probit       = probit
         self.selfunc      = selection_function
+        self.inj_pdf      = inj_pdf
+        if self.inj_pdf is not None:
+            self.inj_pdf  = self.inj_pdf.flatten()
+        self.n_total_inj  = n_total_inj
         if norm is not None:
             self.alpha = norm
         else:
@@ -193,14 +199,25 @@ class par_model:
             int n_draws:            number of draws for the MC integral
         """
         self.alpha   = None
-        volume       = np.prod(np.diff(self.bounds, axis = 1))
-        samples      = rejection_sampler(int(n_draws), self.selfunc, self.bounds)
-        self.sf_norm = np.mean(self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (n_draws, len(self.bounds))))*volume)
-        if pars is not None:
-            self.alpha = np.atleast_1d([np.mean(self.model(samples, *p, *sp).flatten()*self.sf_norm) for p, sp in zip(pars, shared_pars)])
-            self.alpha[self.alpha == 0.] = np.inf
+        if callable(self.selfunc):
+            volume       = np.prod(np.diff(self.bounds, axis = 1))
+            samples      = np.random.uniform(*self.bounds.T, size = (int(n_draws), len(self.bounds)))
+            sf_samples   = self.selfunc(samples)
+#            samples      = rejection_sampler(int(n_draws), self.selfunc, self.bounds)
+#            self.sf_norm = np.mean(self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (n_draws, len(self.bounds))))*volume)
+            if pars is not None:
+                self.alpha = np.atleast_1d([np.mean(self.model(samples, *p, *sp).flatten()*sf_samples*volume) for p, sp in zip(pars, shared_pars)])
+#                self.alpha = np.atleast_1d([np.mean(self.model(samples, *p, *sp).flatten()*self.sf_norm) for p, sp in zip(pars, shared_pars)])
+                self.alpha[self.alpha == 0.] = np.inf
+            else:
+                self.alpha = np.atleast_1d(np.mean(self.pdf(samples)*sf_samples*volume))
+#                self.alpha = np.atleast_1d(np.mean(self.pdf(samples))*self.sf_norm)
         else:
-            self.alpha = np.atleast_1d(np.mean(self.pdf(samples))*self.sf_norm)
+            if pars is not None:
+                self.alpha = np.atleast_1d([np.sum(self.model(self.selfunc, *p, *sp).flatten()/self.inj_pdf)/self.n_total_inj for p, sp in zip(pars, shared_pars)])
+                self.alpha[self.alpha == 0.] = np.inf
+            else:
+                self.alpha = np.atleast_1d(np.sum(self.pdf(self.selfunc).flatten())/self.n_total_inj)
         if len(self.alpha) == 1:
             self.alpha = self.alpha[0]
     
@@ -446,6 +463,8 @@ class AMM:
                        shared_par_bounds  = None,
                        prior_pars         = None,
                        selection_function = None,
+                       inj_pdf            = None,
+                       n_total_inj        = None,
                        n_draws_pars       = None,
                        n_draws_norm       = None,
                        alpha0             = 1.,
@@ -461,6 +480,8 @@ class AMM:
         self.probit       = probit
         self.augment      = augment
         self.selfunc      = selection_function
+        self.inj_pdf      = inj_pdf
+        self.n_total_inj  = n_total_inj
         self.hierarchical = False
         # Parametric models
         if pars is None:
@@ -493,7 +514,7 @@ class AMM:
             self.norm   = [None for _ in models]
         else:
             self.norm   = norm
-        self.par_models = [par_model(mod, list(p) + list(shared_pars), bounds, probit, hierarchical = False, selection_function = self.selfunc, norm = n) for mod, p, n in zip(models, pars, self.norm)]
+        self.par_models = [par_model(mod, list(p) + list(shared_pars), bounds, probit, hierarchical = False, selection_function = self.selfunc, inj_pdf = self.inj_pdf, n_total_inj = n_total_inj, norm = n) for mod, p, n in zip(models, pars, self.norm)]
         # DPGMM initialisation (if required)
         if self.augment:
             self.nonpar = DPGMM(bounds     = bounds,
@@ -763,7 +784,7 @@ class AMM:
                 else:
                     par_vals = [[] for _ in range(len(self.par_models))]
                 shared_par_vals = self.shared_par_draws[id]
-            par_models = [par_model(m.model, list(par) + list(shared_par_vals), self.bounds, self.probit, hierarchical = True, selection_function = self.selfunc, norm = n) for m, par, n in zip(self.par_models, par_vals, self.norm)]
+            par_models = [par_model(m.model, list(par) + list(shared_par_vals), self.bounds, self.probit, hierarchical = True, selection_function = self.selfunc, inj_pdf = self.inj_pdf, n_total_inj = self.n_total_inj, norm = n) for m, par, n in zip(self.par_models, par_vals, self.norm)]
             # Renormalise the models in presence of selection effects
             if self.selfunc is not None:
                 [m._compute_alpha_factor([p], [shared_par_vals], self.n_draws_norm) for m, p, n in zip(par_models, par_vals, self.norm) if n is None]
@@ -784,7 +805,7 @@ class AMM:
             n_shared_pars = len(self.shared_par_bounds)
         else:
             n_shared_pars = 0
-        if self.selfunc and self.hierarchical:
+        if (self.selfunc is not None) and self.hierarchical:
             alphas = [m.alpha for m in par_models]
             if self.augment:
                 alphas = [nonpar.alpha_factor] + alphas
@@ -827,6 +848,8 @@ class HAMM(AMM):
                        shared_par_bounds  = None,
                        prior_pars         = None,
                        selection_function = None,
+                       inj_pdf            = None,
+                       n_total_inj        = None,
                        n_draws_pars       = 1e3,
                        n_draws_norm       = 5e3,
                        MC_draws           = None,
@@ -846,6 +869,8 @@ class HAMM(AMM):
                          shared_par_bounds  = shared_par_bounds,
                          prior_pars         = None,
                          selection_function = selection_function,
+                         inj_pdf            = inj_pdf,
+                         n_total_inj        = n_total_inj,
                          n_draws_pars       = n_draws_pars,
                          n_draws_norm       = n_draws_norm,
                          alpha0             = alpha0,
@@ -861,12 +886,16 @@ class HAMM(AMM):
             model.hierarchical = True
         # (H)DPGMM initialisation (if required)
         if self.augment:
+            if not callable(selection_function):
+                print('Selection effects estimated with samples. Potential numerical instability for (H)DPGMM.')
             self.nonpar      = HDPGMM(bounds             = bounds,
                                       prior_pars         = prior_pars,
                                       alpha0             = alpha0,
                                       probit             = self.probit,
                                       MC_draws           = MC_draws,
                                       selection_function = selection_function,
+                                      inj_pdf            = inj_pdf,
+                                      n_total_inj        = n_total_inj,
                                       )
             self.components  = [self.nonpar] + self.par_models
         

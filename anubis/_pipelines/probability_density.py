@@ -27,6 +27,8 @@ class worker:
                        par_bounds,
                        shared_par_bounds,
                        selection_function = None,
+                       inj_pdf            = None,
+                       n_total_inj        = None,
                        MC_draws_pars      = 1e3,
                        MC_draws_norm      = 5e3,
                        n_reassignments    = None,
@@ -61,6 +63,8 @@ class worker:
                            probit             = probit,
                            prior_pars         = prior_pars,
                            selection_function = selection_function,
+                           inj_pdf            = inj_pdf,
+                           n_total_inj        = n_total_inj,
                            )
         self.samples = np.copy(samples)
         self.samples.setflags(write = True)
@@ -157,9 +161,7 @@ def main():
     # If provided, load selecton function
     selfunc = None
     if options.selfunc_file is not None:
-        selfunc, _, _, _ = load_selection_function(options.selfunc_file, par = options.par)
-        if not callable(selfunc):
-            raise Exception("Only .py files with callable approximants are allowed for DPGMM reconstruction")
+        selfunc, inj_pdf, n_total_inj, _ = load_selection_function(options.selfunc_file, par = options.par)
     # If provided, read true parameters and weights
     if options.true_pars is not None:
         options.true_pars = [float(eval(p)) for p in options.true_pars.split(',')]

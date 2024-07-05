@@ -37,6 +37,8 @@ class worker:
                        out_folder_plots,
                        out_folder_draws,
                        selection_function = None,
+                       inj_pdf            = None,
+                       n_total_inj        = None,
                        MC_draws_pars      = 1e3,
                        MC_draws_norm      = 5e3,
                        n_reassignments    = None,
@@ -90,6 +92,8 @@ class worker:
                             probit             = self.probit,
                             prior_pars         = prior_pars,
                             selection_function = selection_function,
+                            inj_pdf            = inj_pdf,
+                            n_total_inj        = n_total_inj,
                             )
     
     def run_event(self, pars):
@@ -140,7 +144,6 @@ class worker:
     
     def load_posteriors(self, posteriors):
         self.posteriors = deepcopy(posteriors)
-#        self.posteriors.setflags(write = True)
         for i in range(len(self.posteriors)):
             self.posteriors[i][0].setflags(write = True)
 
@@ -268,10 +271,8 @@ def main():
     # If provided, load selecton function
     selfunc = None
     if options.selfunc_file is not None:
-        selfunc, _, _, _ = load_selection_function(options.selfunc_file, par = options.par)
-        if not callable(selfunc):
-            raise Exception("Only .py files with callable approximants are allowed for DPGMM reconstruction")
-    if options.include_dvdz:
+        selfunc, inj_pdf, n_total_inj, _ = load_selection_function(options.selfunc_file, par = options.par)
+    if options.include_dvdz and callable(selfunc):
         if options.par is None:
             print("Redshift is assumed to be the last parameter")
             z_index = -1
@@ -359,6 +360,8 @@ def main():
                                         out_folder_plots   = output_plots,
                                         out_folder_draws   = output_draws,
                                         selection_function = dec_selfunc,
+                                        inj_pdf            = inj_pdf,
+                                        n_total_inj        = n_total_inj,
                                         MC_draws_pars      = options.MC_draws_pars,
                                         MC_draws_norm      = options.MC_draws_norm,
                                         n_reassignments    = options.n_reassignments,
