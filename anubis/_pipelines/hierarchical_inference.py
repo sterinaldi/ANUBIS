@@ -18,7 +18,7 @@ from figaro.load import load_selection_function, supported_pars, load_single_eve
 from figaro.rate import sample_rate, normalise_alpha_factor, plot_integrated_rate, plot_differential_rate
 from figaro.cosmology import _decorator_dVdz, dVdz_approx_planck18, dVdz_approx_planck15
 
-from anubis.mixture import HierHMM
+from anubis.mixture import HAMM
 from anubis.load import load_density, load_models, load_injected_density, load_data as load_data_anubis, save_density as save_density_anubis
 from anubis.plot import plot_parametric, plot_non_parametric, plot_samples, plot_median_cr
 
@@ -76,21 +76,21 @@ class worker:
             prior_pars = None
             
         self.DPGMM   = DPGMM(self.bounds, probit = probit)
-        self.mixture = HierHMM(models             = models,
-                               bounds             = self.bounds,
-                               pars               = pars,
-                               par_bounds         = par_bounds,
-                               shared_pars        = shared_pars,
-                               shared_par_bounds  = shared_par_bounds,
-                               augment            = augment,
-                               gamma0             = gamma0,
-                               n_reassignments    = n_reassignments,
-                               n_draws_pars       = MC_draws_pars,
-                               n_draws_norm       = MC_draws_norm,
-                               probit             = self.probit,
-                               prior_pars         = prior_pars,
-                               selection_function = selection_function,
-                               )
+        self.mixture = HAMM(models             = models,
+                            bounds             = self.bounds,
+                            pars               = pars,
+                            par_bounds         = par_bounds,
+                            shared_pars        = shared_pars,
+                            shared_par_bounds  = shared_par_bounds,
+                            augment            = augment,
+                            gamma0             = gamma0,
+                            n_reassignments    = n_reassignments,
+                            n_draws_pars       = MC_draws_pars,
+                            n_draws_norm       = MC_draws_norm,
+                            probit             = self.probit,
+                            prior_pars         = prior_pars,
+                            selection_function = selection_function,
+                            )
     
     def run_event(self, pars):
         # Unpack data
@@ -168,7 +168,7 @@ def main():
     parser.add_option("--hier_samples", type = "string", dest = "hier_samples", help = "Samples from hierarchical distribution (true single-event values, for simulations only)", default = None)
     # Settings
     parser.add_option("--no_augment", dest = "augment", action = 'store_false', help = "Disable non-parametric augmentation", default = True)
-    parser.add_option("--draws", type = "int", dest = "draws", help = "Number of draws", default = 100)
+    parser.add_option("--draws", type = "int", dest = "draws", help = "Number of draws", default = 1000)
     parser.add_option("--se_draws", type = "int", dest = "se_draws", help = "Number of draws for single-event distribution. Default: same as hierarchical distribution", default = None)
     parser.add_option("--n_samples_dsp", type = "int", dest = "n_samples_dsp", help = "Number of samples to analyse (downsampling). Default: all", default = -1)
     parser.add_option("--exclude_points", dest = "exclude_points", action = 'store_true', help = "Exclude points outside bounds from analysis", default = False)
@@ -405,7 +405,7 @@ def main():
         draws = np.array(draws)
     #        if options.include_dvdz:
     #            normalise_alpha_factor(draws, dvdz = approx_dVdz, z_index = z_index, z_max = options.bounds[z_index][1])
-            # Save draws
+        # Save draws
         save_density_anubis(draws,
                             models,
                             folder = options.output,
@@ -460,7 +460,7 @@ def main():
                  models       = models,
                  true_pars    = options.true_pars,
                  true_weights = options.true_weights,
-                 name         = hier_name,
+                 name         = options.hier_name,
                  )
 
 if __name__ == '__main__':

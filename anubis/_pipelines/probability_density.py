@@ -11,7 +11,7 @@ from warnings import warn
 from figaro.utils import save_options, load_options, get_priors
 from figaro.load import load_single_event, load_selection_function, supported_extensions, supported_pars
 
-from anubis.mixture import HMM
+from anubis.mixture import AMM
 from anubis.load import load_density, save_density, load_models, load_injected_density
 from anubis.plot import plot_parametric, plot_non_parametric, plot_samples, plot_median_cr
 
@@ -47,7 +47,7 @@ class worker:
                                     )
         else:
             prior_pars = None
-        self.mixture = HMM(models             = models,
+        self.mixture = AMM(models             = models,
                            bounds             = bounds,
                            pars               = pars,
                            par_bounds         = par_bounds,
