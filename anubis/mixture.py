@@ -809,7 +809,7 @@ class AMM:
             alphas = [m.alpha for m in par_models]
             if self.augment:
                 alphas = [nonpar.alpha_factor] + alphas
-            n_pts = self.n_pts/np.array(alphas)
+            n_pts = np.nan_to_num(self.n_pts/np.array(alphas), neginf = 0., posinf = 0., nan = 0.)
         else:
             n_pts = self.n_pts
         return het_mixture(models, dirichlet(n_pts+self.gamma0).rvs()[0], self.bounds, self.augment, selfunc = self.selfunc, n_shared_pars = n_shared_pars, hierarchical = self.hierarchical)
@@ -894,8 +894,8 @@ class HAMM(AMM):
                                       probit             = self.probit,
                                       MC_draws           = MC_draws,
                                       selection_function = selection_function,
-                                      inj_pdf            = inj_pdf,
-                                      n_total_inj        = n_total_inj,
+                                      injection_pdf      = inj_pdf,
+                                      total_injections   = n_total_inj,
                                       )
             self.components  = [self.nonpar] + self.par_models
         
