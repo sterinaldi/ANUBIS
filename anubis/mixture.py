@@ -203,15 +203,11 @@ class par_model:
             volume       = np.prod(np.diff(self.bounds, axis = 1))
             samples      = np.random.uniform(*self.bounds.T, size = (int(n_draws), len(self.bounds)))
             sf_samples   = self.selfunc(samples)
-#            samples      = rejection_sampler(int(n_draws), self.selfunc, self.bounds)
-#            self.sf_norm = np.mean(self.selfunc(np.random.uniform(low = self.bounds[:,0], high = self.bounds[:,1], size = (n_draws, len(self.bounds))))*volume)
             if pars is not None:
                 self.alpha = np.atleast_1d([np.mean(self.model(samples, *p, *sp).flatten()*sf_samples*volume) for p, sp in zip(pars, shared_pars)])
-#                self.alpha = np.atleast_1d([np.mean(self.model(samples, *p, *sp).flatten()*self.sf_norm) for p, sp in zip(pars, shared_pars)])
                 self.alpha[self.alpha == 0.] = np.inf
             else:
                 self.alpha = np.atleast_1d(np.mean(self.pdf(samples)*sf_samples*volume))
-#                self.alpha = np.atleast_1d(np.mean(self.pdf(samples))*self.sf_norm)
         else:
             if pars is not None:
                 self.alpha = np.atleast_1d([np.sum(self.model(self.selfunc, *p, *sp).flatten()/self.inj_pdf)/self.n_total_inj for p, sp in zip(pars, shared_pars)])
@@ -509,7 +505,7 @@ class AMM:
             if n_draws_norm is not None:
                 self.n_draws_norm = int(n_draws_norm)
             else:
-                self.n_draws_norm = int(5e3)
+                self.n_draws_norm = int(1e3)
         if norm is None:
             self.norm   = [None for _ in models]
         else:
@@ -886,7 +882,7 @@ class HAMM(AMM):
             model.hierarchical = True
         # (H)DPGMM initialisation (if required)
         if self.augment:
-            if not callable(selection_function):
+            if selection_function is not None and not callable(selection_function):
                 print('Selection effects estimated with samples. Potential numerical instability for (H)DPGMM.')
             self.nonpar      = HDPGMM(bounds             = bounds,
                                       prior_pars         = prior_pars,
