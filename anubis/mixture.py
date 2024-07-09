@@ -202,7 +202,7 @@ class par_model:
         if callable(self.selfunc):
             volume       = np.prod(np.diff(self.bounds, axis = 1))
             samples      = np.random.uniform(*self.bounds.T, size = (int(n_draws), len(self.bounds)))
-            sf_samples   = self.selfunc(samples)
+            sf_samples   = self.selfunc(samples).flatten()
             if pars is not None:
                 self.alpha = np.atleast_1d([np.mean(self.model(samples, *p, *sp).flatten()*sf_samples*volume) for p, sp in zip(pars, shared_pars)])
                 self.alpha[self.alpha == 0.] = np.inf
