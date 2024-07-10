@@ -231,7 +231,7 @@ def load_models(file_models):
     d_names = {}
     for i in flatten_names: d_names[i] = i in d_names
     set_names         = list(dict.fromkeys(flatten_names).keys())
-    set_bounds        = list(dict.fromkeys(flatten_bounds).keys())
+    set_bounds        = [[flatten_bounds[i] for i, name in enumerate(flatten_names) if name == par][0] for par in set_names]
     unique_names      = [k for k in flatten_names if not d_names[k]]
     shared_par_bounds = [list(x) for x, k in zip(set_bounds, set_names) if d_names[k]]
     # Build list of unique bounds to return
