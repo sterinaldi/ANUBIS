@@ -159,7 +159,9 @@ def main():
     if options.inj_density_file is not None:
         inj_density, inj_parametric, inj_non_parametric = load_injected_density(options.inj_density_file)
     # If provided, load selecton function
-    selfunc = None
+    selfunc     = None
+    inj_pdf     = None
+    n_total_inj = None
     if options.selfunc_file is not None:
         selfunc, inj_pdf, n_total_inj, _ = load_selection_function(options.selfunc_file, par = options.par)
     # If provided, read true parameters and weights
