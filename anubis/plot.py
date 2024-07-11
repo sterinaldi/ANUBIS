@@ -15,7 +15,7 @@ plot_keys = ['pars', 'weights', 'joint', 'all']
 
 def _add_label_to_kwargs(d):
     if not 'median_label' in d.keys():
-        if not d['hierarchical']:
+        if 'hierarchical' in d.keys() and not d['hierarchical']:
             d['median_label'] = '\mathrm{AMM}'
         else:
             d['median_label'] = '\mathrm{HAMM}'
