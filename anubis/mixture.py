@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.stats import dirichlet
+from scipy.stats import qmc
 
 from anubis.exceptions import ANUBISException
 from figaro.mixture import DPGMM, HDPGMM, mixture, _update_alpha
@@ -201,7 +202,8 @@ class par_model:
         self.alpha   = None
         if callable(self.selfunc):
             volume       = np.prod(np.diff(self.bounds, axis = 1))
-            samples      = np.random.uniform(*self.bounds.T, size = (int(n_draws), len(self.bounds)))
+#            samples      = np.random.uniform(*self.bounds.T, size = (int(n_draws), len(self.bounds)))
+            samples      = qmc.scale(qmc.Halton(len(self.bounds)).random(int(n_draws)), *self.bounds.T)
             sf_samples   = self.selfunc(samples).flatten()
             if pars is not None:
                 self.alpha = np.atleast_1d([np.mean(self.model(samples, *p, *sp).flatten()*sf_samples*volume) for p, sp in zip(pars, shared_pars)])
@@ -492,7 +494,8 @@ class AMM:
             else:
                 self.n_draws_pars = int(1e3)
         else:
-            self.par_bounds = None
+            self.par_bounds   = None
+            self.n_draws_pars = 1
         if shared_par_bounds is not None:
             self.shared_par_bounds = np.atleast_2d(shared_par_bounds)
             if n_draws_pars is not None:
@@ -501,6 +504,7 @@ class AMM:
                 self.n_draws_pars = int(1e3)
         else:
             self.shared_par_bounds = None
+            self.n_draws_pars      = 1
         if self.selfunc is not None:
             if n_draws_norm is not None:
                 self.n_draws_norm = int(n_draws_norm)
@@ -569,13 +573,18 @@ class AMM:
         if self.par_bounds is not None or self.shared_par_bounds is not None:
             self.evaluated_logL       = {}
             if self.par_bounds is not None:
-                self.par_draws        = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws_pars, len(b))) if b is not None else None for b in self.par_bounds]
+#                self.par_draws        = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws_pars, len(b))) if b is not None else None for b in self.par_bounds]
+                self.par_draws        = [qmc.scale(qmc.Halton(len(b)).random(self.n_draws_pars), *b.T) if b is not None else None for b in self.par_bounds]
             else:
                 self.par_draws        = [[[] for _ in range(self.n_draws_pars)] for _ in range(len(self.components[self.augment:]))]
             if self.shared_par_bounds is not None:
-                self.shared_par_draws = np.random.uniform(low = self.shared_par_bounds[:,0], high = self.shared_par_bounds[:,1], size = (self.n_draws_pars, len(self.shared_par_bounds)))
+#                self.shared_par_draws = np.random.uniform(low = self.shared_par_bounds[:,0], high = self.shared_par_bounds[:,1], size = (self.n_draws_pars, len(self.shared_par_bounds)))
+                self.shared_par_draws = qmc.scale(qmc.Halton(len(self.shared_par_bounds)).random(self.n_draws_pars), *self.shared_par_bounds.T)
             else:
                 self.shared_par_draws = [[] for _ in range(self.n_draws_pars)]
+        else:
+            self.par_draws        = [[[] for _ in range(self.n_draws_pars)] for _ in range(len(self.components[self.augment:]))]
+            self.shared_par_draws = [[] for _ in range(self.n_draws_pars)]
         if self.selfunc is not None:
             [m._compute_alpha_factor(p, self.shared_par_draws, self.n_draws_norm) for m, p, n in zip(self.components[self.augment:], self.par_draws, self.norm) if n is None]
         if self.augment:
