@@ -504,7 +504,6 @@ class AMM:
                 self.n_draws_pars = int(1e3)
         else:
             self.shared_par_bounds = None
-            self.n_draws_pars      = 1
         if self.selfunc is not None:
             if n_draws_norm is not None:
                 self.n_draws_norm = int(n_draws_norm)
@@ -856,7 +855,7 @@ class HAMM(AMM):
                        inj_pdf            = None,
                        n_total_inj        = None,
                        n_draws_pars       = 1e3,
-                       n_draws_norm       = 5e3,
+                       n_draws_norm       = 1e3,
                        MC_draws           = None,
                        alpha0             = 1.,
                        gamma0             = None,
