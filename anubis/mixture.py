@@ -727,11 +727,12 @@ class AMM:
         for s in samples:
             self.add_new_point(s)
         # Random Gibbs walk (if required)
-        for id in np.random.choice(int(np.sum(self.n_pts)), size = int(n_reassignments), replace = True):
-            self._reassign_point(int(id))
-        # Reassign all points once
-        for id in range(int(np.sum(self.n_pts))):
-            self._reassign_point(int(id))
+        if self.n_components > 1:
+            for id in np.random.choice(int(np.sum(self.n_pts)), size = int(n_reassignments), replace = True):
+                self._reassign_point(int(id))
+            # Reassign all points once
+            for id in range(int(np.sum(self.n_pts))):
+                self._reassign_point(int(id))
         d = self.build_mixture(make_comp = make_comp)
         self.initialise()
         return d
@@ -769,11 +770,10 @@ class AMM:
                 # Individual subspaces
                 for i in range(len(self.par_models)):
                     if self.par_draws[i] is not None:
-                        pars        = self.par_draws[i].T
                         i_p         = i + self.augment
                         log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0))
                         vals        = np.exp(log_total_p - logsumexp_jit(log_total_p))
-                        par_vals.append(np.atleast_1d([np.random.choice(p, p = vals) for p in pars]))
+                        par_vals.append(self.par_draws[i][np.random.choice(self.n_draws_pars, p = vals)])
                     else:
                         par_vals.append([])
                 shared_par_vals = []
@@ -854,8 +854,8 @@ class HAMM(AMM):
                        selection_function = None,
                        inj_pdf            = None,
                        n_total_inj        = None,
-                       n_draws_pars       = 1e3,
-                       n_draws_norm       = 1e3,
+                       n_draws_pars       = None,
+                       n_draws_norm       = None,
                        MC_draws           = None,
                        alpha0             = 1.,
                        gamma0             = None,
