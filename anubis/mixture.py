@@ -1,8 +1,11 @@
 import numpy as np
 from scipy.stats import dirichlet
-from scipy.stats import qmc
+from scipy.stats import qmc, multivariate_normal as mn
+from emcee import EnsembleSampler, State
+from emcee.moves import GaussianMove, StretchMove
 
 from anubis.exceptions import ANUBISException
+from anubis._likelihood import _population_log_likelihood, _joint_population_log_likelihood
 from figaro.mixture import DPGMM, HDPGMM, mixture, _update_alpha
 from figaro.decorators import probit
 from figaro.transform import transform_to_probit
@@ -166,6 +169,7 @@ class par_model:
         self.dim          = len(self.bounds)
         self.probit       = probit
         self.selfunc      = selection_function
+        self.samples      = None
         self.inj_pdf      = inj_pdf
         if self.inj_pdf is not None:
             self.inj_pdf  = self.inj_pdf.flatten()
@@ -199,20 +203,20 @@ class par_model:
             np.ndarray shared pars: shared parameters of the distribution
             int n_draws:            number of draws for the MC integral
         """
-        self.alpha   = None
+        self.alpha = None
         if callable(self.selfunc):
-            volume       = np.prod(np.diff(self.bounds, axis = 1))
-#            samples      = np.random.uniform(*self.bounds.T, size = (int(n_draws), len(self.bounds)))
-            samples      = qmc.scale(qmc.Halton(len(self.bounds)).random(int(n_draws)), *self.bounds.T)
-            sf_samples   = self.selfunc(samples).flatten()
+            if self.samples is None:
+                self.volume     = np.prod(np.diff(self.bounds, axis = 1))
+                self.samples    = qmc.scale(qmc.Halton(len(self.bounds)).random(int(n_draws)), *self.bounds.T)
+                self.sf_samples = self.selfunc(self.samples).flatten()
             if pars is not None:
-                self.alpha = np.atleast_1d([np.mean(self.model(samples, *p, *sp).flatten()*sf_samples*volume) for p, sp in zip(pars, shared_pars)])
+                self.alpha = np.nan_to_num(np.atleast_1d([np.mean(self.model(self.samples, *p, *sp).flatten()*self.sf_samples*self.volume) for p, sp in zip(pars, shared_pars)]), neginf = np.inf, nan = np.inf)
                 self.alpha[self.alpha == 0.] = np.inf
             else:
-                self.alpha = np.atleast_1d(np.mean(self.pdf(samples)*sf_samples*volume))
+                self.alpha = np.atleast_1d(np.mean(self.pdf(self.samples)*self.sf_samples*self.volume))
         else:
             if pars is not None:
-                self.alpha = np.atleast_1d([np.sum(self.model(self.selfunc, *p, *sp).flatten()/self.inj_pdf)/self.n_total_inj for p, sp in zip(pars, shared_pars)])
+                self.alpha = np.nan_to_num(np.atleast_1d([np.sum(self.model(self.selfunc, *p, *sp).flatten()/self.inj_pdf)/self.n_total_inj for p, sp in zip(pars, shared_pars)]), neginf = np.inf, nan = np.inf)
                 self.alpha[self.alpha == 0.] = np.inf
             else:
                 self.alpha = np.atleast_1d(np.sum(self.pdf(self.selfunc).flatten())/self.n_total_inj)
@@ -508,7 +512,7 @@ class AMM:
             if n_draws_norm is not None:
                 self.n_draws_norm = int(n_draws_norm)
             else:
-                self.n_draws_norm = int(1e3)
+                self.n_draws_norm = int(1e4)
         if norm is None:
             self.norm   = [None for _ in models]
         else:
@@ -538,6 +542,24 @@ class AMM:
                 self.gamma0 = gamma0
             else:
                 raise Exception("gamma0 must be an array with {0} components or a float.".format(self.n_components))
+        # FIXME: N different samplers or joint sampler
+        if self.shared_par_bounds is None:
+            self.samplers = [EnsembleSampler(nwalkers    = 2*len(b)+1,
+                                             ndim        = len(b),
+                                             log_prob_fn = _population_log_likelihood,
+                                             args        = ([self]),
+                                             moves       = GaussianMove((np.diff(b).flatten()/20)**2),
+                                             )
+                            for b in self.par_bounds]
+        else:
+            n_pars          = np.sum([len(b) for b in self.par_bounds])+len(self.shared_par_bounds)
+            self.all_bounds = np.array([bi for b in self.par_bounds for bi in b] + self.shared_par_bounds).reshape(-1,2)
+            self.sampler = EnsembleSampler(nwalkers    = 2*n_pars+1,
+                                           ndim        = n_pars,
+                                           log_prob_fn = _joint_population_log_likelihood,
+                                           args        = ([self]),
+                                           moves       = GaussianMove((np.diff(all_bounds).flatten()/20)**2),
+                                           )
         # Initialisation
         self.initialise()
     
@@ -572,12 +594,10 @@ class AMM:
         if self.par_bounds is not None or self.shared_par_bounds is not None:
             self.evaluated_logL       = {}
             if self.par_bounds is not None:
-#                self.par_draws        = [np.random.uniform(low = b[:,0], high = b[:,1], size = (self.n_draws_pars, len(b))) if b is not None else None for b in self.par_bounds]
                 self.par_draws        = [qmc.scale(qmc.Halton(len(b)).random(self.n_draws_pars), *b.T) if b is not None else None for b in self.par_bounds]
             else:
                 self.par_draws        = [[[] for _ in range(self.n_draws_pars)] for _ in range(len(self.components[self.augment:]))]
             if self.shared_par_bounds is not None:
-#                self.shared_par_draws = np.random.uniform(low = self.shared_par_bounds[:,0], high = self.shared_par_bounds[:,1], size = (self.n_draws_pars, len(self.shared_par_bounds)))
                 self.shared_par_draws = qmc.scale(qmc.Halton(len(self.shared_par_bounds)).random(self.n_draws_pars), *self.shared_par_bounds.T)
             else:
                 self.shared_par_draws = [[] for _ in range(self.n_draws_pars)]
@@ -721,7 +741,7 @@ class AMM:
         """
         np.random.shuffle(samples)
         if self.n_reassignments is None:
-            n_reassignments = 5*len(samples)
+            n_reassignments = 10*len(samples)
         else:
             n_reassignments = self.n_reassignments
         for s in samples:
@@ -770,10 +790,21 @@ class AMM:
                 # Individual subspaces
                 for i in range(len(self.par_models)):
                     if self.par_draws[i] is not None:
-                        i_p         = i + self.augment
-                        log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0))
-                        vals        = np.exp(log_total_p - logsumexp_jit(log_total_p))
-                        par_vals.append(self.par_draws[i][np.random.choice(self.n_draws_pars, p = vals)])
+                        i_p           = i + self.augment
+                        log_total_p   = np.atleast_1d(np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0))
+                        vals          = np.exp(log_total_p - logsumexp_jit(log_total_p))
+                        max_p         = self.par_draws[i][np.where(vals == vals.max())].flatten()
+                        initial_guess = np.array([max_p for _ in range(self.samplers[i].nwalkers)])
+                        if initial_guess.shape[0] == 1:
+                            initial_guess = initial_guess.T
+                        self.model_to_sample = i
+                        self.samplers[i].run_mcmc(initial_state = initial_guess,
+                                                  nsteps        = 100, #FIXME: ad-hoc par
+                                                  progress      = False,
+                                                  skip_initial_state_check = True,
+                                                  )
+                        
+                        par_vals.append(self.samplers[i].get_last_sample()[0][np.random.randint(self.samplers[i].nwalkers)])
                     else:
                         par_vals.append([])
                 shared_par_vals = []
@@ -782,7 +813,14 @@ class AMM:
                 # Joint distribution
                 log_total_p  = np.array([self.evaluated_logL[pt][self.assignations[pt]] for pt in range(int(np.sum(self.n_pts)))]).sum(0)
                 vals         = np.exp(log_total_p - logsumexp_jit(log_total_p))
-                id           = np.random.choice(self.n_draws_pars, p = vals)
+#                id           = np.random.choice(self.n_draws_pars, p = vals)
+                # FIXME: max logP as initial state
+                initial_guess = np.atleast_2d(mn(self.par_draws[np.where(vals == vals.max())].flatten(), np.identity(len(self.par_bounds[i]))*(np.diff(self.par_bounds[i])/20)**2).rvs(2*len(self.par_bounds[i])+1))
+                self.sampler.run_mcmc(initial_state = initial_guess,
+                                      nsteps        = 100,
+                                      progress      = False,
+                                      skip_initial_state_check = True,
+                                      )
                 if self.par_bounds is not None:
                     par_vals = [self.par_draws[i][id].T if self.par_draws[i] is not None else [] for i in range(len(self.par_models))]
                 else:
@@ -931,6 +969,8 @@ class HAMM(AMM):
                     log_p = np.zeros(len(self.par_draws[i_p]))
                     if hasattr(self.components[i].alpha, '__iter__'):
                         for j, (p, sp, n) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws, self.components[i].alpha)):
+                            if np.isnan(n):
+                                print(p)
                             log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()/n))
                     else:
                         for j, (p, sp) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws)):
