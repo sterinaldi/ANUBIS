@@ -799,7 +799,7 @@ class AMM:
                             initial_guess = initial_guess.T
                         self.model_to_sample = i
                         self.samplers[i].run_mcmc(initial_state = initial_guess,
-                                                  nsteps        = 100, #FIXME: ad-hoc par
+                                                  nsteps        = 1000, # FIXME: ad-hoc par
                                                   progress      = False,
                                                   skip_initial_state_check = True,
                                                   )
@@ -817,7 +817,7 @@ class AMM:
                 # FIXME: max logP as initial state
                 initial_guess = np.atleast_2d(mn(self.par_draws[np.where(vals == vals.max())].flatten(), np.identity(len(self.par_bounds[i]))*(np.diff(self.par_bounds[i])/20)**2).rvs(2*len(self.par_bounds[i])+1))
                 self.sampler.run_mcmc(initial_state = initial_guess,
-                                      nsteps        = 100,
+                                      nsteps        = 1000,
                                       progress      = False,
                                       skip_initial_state_check = True,
                                       )
