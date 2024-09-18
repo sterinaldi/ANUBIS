@@ -544,7 +544,10 @@ class AMM:
                 self.gamma0 = gamma0
             else:
                 raise Exception("gamma0 must be an array with {0} components or a float.".format(self.n_components))
-        self.n_steps_mcmc = int(n_steps_mcmc)
+        if n_steps_mcmc is None:
+            self.n_steps_mcmc = int(1e3)
+        else:
+            self.n_steps_mcmc = int(n_steps_mcmc)
         if self.shared_par_bounds is None:
             self.samplers = [EnsembleSampler(nwalkers    = 1,
                                              ndim        = len(b),
@@ -796,9 +799,10 @@ class AMM:
                         log_total_p          = np.atleast_1d(np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0))
                         max_p                = self.par_draws[i][np.where(log_total_p == log_total_p.max())].flatten()
                         self.model_to_sample = i
-                        self.samplers[i].run_mcmc(initial_state = max_p,
-                                                  nsteps        = self.n_steps_mcmc,
-                                                  progress      = False,
+                        self.samplers[i].run_mcmc(initial_state            = max_p,
+                                                  nsteps                   = self.n_steps_mcmc,
+                                                  progress                 = False,
+                                                  skip_initial_state_check = True,
                                                   )
                         par_vals.append(self.samplers[i].get_last_sample()[0][0])
                     else:
@@ -809,9 +813,10 @@ class AMM:
                 # Joint distribution
                 log_total_p  = np.array([self.evaluated_logL[pt][self.assignations[pt]] for pt in range(int(np.sum(self.n_pts)))]).sum(0)
                 max_p        = self.par_draws[np.where(log_total_p == log_total_p.max())].flatten()
-                self.sampler.run_mcmc(initial_state = initial_guess,
-                                      nsteps        = self.n_steps_mcmc,
-                                      progress      = False,
+                self.sampler.run_mcmc(initial_state            = initial_guess,
+                                      nsteps                   = self.n_steps_mcmc,
+                                      progress                 = False,
+                                      skip_initial_state_check = True,
                                       )
                 pt = self.samplers[i].get_last_sample()[0][0]
                 # Unpack sample
