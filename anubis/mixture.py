@@ -453,6 +453,7 @@ class AMM:
         bool augment:               whether to include the non-parametric channel
         int n_reassignments:        number of reassignments
         np.ndarray norm:            normalisation constant for the parametric observed distributions. Use None if not available
+        int n_steps_mcmc:           number of steps for the mcmc sampler before drawing a sample
     
     Returns:
         AMM: instance of AMM class
@@ -475,6 +476,7 @@ class AMM:
                        augment            = True,
                        n_reassignments    = None,
                        norm               = None,
+                       n_steps_mcmc       = 1e3,
                        ):
         # Settings
         self.bounds       = np.atleast_2d(bounds)
@@ -542,9 +544,9 @@ class AMM:
                 self.gamma0 = gamma0
             else:
                 raise Exception("gamma0 must be an array with {0} components or a float.".format(self.n_components))
-        # FIXME: N different samplers or joint sampler
+        self.n_steps_mcmc = int(n_steps_mcmc)
         if self.shared_par_bounds is None:
-            self.samplers = [EnsembleSampler(nwalkers    = 2*len(b)+1,
+            self.samplers = [EnsembleSampler(nwalkers    = 1,
                                              ndim        = len(b),
                                              log_prob_fn = _population_log_likelihood,
                                              args        = ([self]),
@@ -554,7 +556,7 @@ class AMM:
         else:
             n_pars          = np.sum([len(b) for b in self.par_bounds])+len(self.shared_par_bounds)
             self.all_bounds = np.array([bi for b in self.par_bounds for bi in b] + self.shared_par_bounds).reshape(-1,2)
-            self.sampler = EnsembleSampler(nwalkers    = 2*n_pars+1,
+            self.sampler = EnsembleSampler(nwalkers    = 1,
                                            ndim        = n_pars,
                                            log_prob_fn = _joint_population_log_likelihood,
                                            args        = ([self]),
@@ -790,21 +792,15 @@ class AMM:
                 # Individual subspaces
                 for i in range(len(self.par_models)):
                     if self.par_draws[i] is not None:
-                        i_p           = i + self.augment
-                        log_total_p   = np.atleast_1d(np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0))
-                        vals          = np.exp(log_total_p - logsumexp_jit(log_total_p))
-                        max_p         = self.par_draws[i][np.where(vals == vals.max())].flatten()
-                        initial_guess = np.array([max_p for _ in range(self.samplers[i].nwalkers)])
-                        if initial_guess.shape[0] == 1:
-                            initial_guess = initial_guess.T
+                        i_p                  = i + self.augment
+                        log_total_p          = np.atleast_1d(np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0))
+                        max_p                = self.par_draws[i][np.where(log_total_p == log_total_p.max())].flatten()
                         self.model_to_sample = i
-                        self.samplers[i].run_mcmc(initial_state = initial_guess,
-                                                  nsteps        = 1000, # FIXME: ad-hoc par
+                        self.samplers[i].run_mcmc(initial_state = max_p,
+                                                  nsteps        = self.n_steps_mcmc,
                                                   progress      = False,
-                                                  skip_initial_state_check = True,
                                                   )
-                        
-                        par_vals.append(self.samplers[i].get_last_sample()[0][np.random.randint(self.samplers[i].nwalkers)])
+                        par_vals.append(self.samplers[i].get_last_sample()[0][0])
                     else:
                         par_vals.append([])
                 shared_par_vals = []
@@ -812,20 +808,26 @@ class AMM:
             else:
                 # Joint distribution
                 log_total_p  = np.array([self.evaluated_logL[pt][self.assignations[pt]] for pt in range(int(np.sum(self.n_pts)))]).sum(0)
-                vals         = np.exp(log_total_p - logsumexp_jit(log_total_p))
-#                id           = np.random.choice(self.n_draws_pars, p = vals)
-                # FIXME: max logP as initial state
-                initial_guess = np.atleast_2d(mn(self.par_draws[np.where(vals == vals.max())].flatten(), np.identity(len(self.par_bounds[i]))*(np.diff(self.par_bounds[i])/20)**2).rvs(2*len(self.par_bounds[i])+1))
+                max_p        = self.par_draws[np.where(log_total_p == log_total_p.max())].flatten()
                 self.sampler.run_mcmc(initial_state = initial_guess,
-                                      nsteps        = 1000,
+                                      nsteps        = self.n_steps_mcmc,
                                       progress      = False,
-                                      skip_initial_state_check = True,
                                       )
+                pt = self.samplers[i].get_last_sample()[0][0]
+                # Unpack sample
                 if self.par_bounds is not None:
-                    par_vals = [self.par_draws[i][id].T if self.par_draws[i] is not None else [] for i in range(len(self.par_models))]
+                    par_vals = []
+                    n_prev_pars = 0
+                    for i, b in enumerate(self.par_bounds):
+                        if self.par_draws[i] is not None:
+                            par_vals.append(pt[n_prev_pars:n_prev_pars+len(b)])
+                            n_prev_pars += len(b)
+                        else:
+                            par_vals.append([])
                 else:
                     par_vals = [[] for _ in range(len(self.par_models))]
-                shared_par_vals = self.shared_par_draws[id]
+                shared_par_vals = pt[-self.n_shared_pars:]
+            # Build parametric models
             par_models = [par_model(m.model, list(par) + list(shared_par_vals), self.bounds, self.probit, hierarchical = True, selection_function = self.selfunc, inj_pdf = self.inj_pdf, n_total_inj = self.n_total_inj, norm = n) for m, par, n in zip(self.par_models, par_vals, self.norm)]
             # Renormalise the models in presence of selection effects
             if self.selfunc is not None:
