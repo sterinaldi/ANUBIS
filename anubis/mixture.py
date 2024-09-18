@@ -476,7 +476,7 @@ class AMM:
                        augment            = True,
                        n_reassignments    = None,
                        norm               = None,
-                       n_steps_mcmc       = 1e3,
+                       n_steps_mcmc       = None,
                        ):
         # Settings
         self.bounds       = np.atleast_2d(bounds)
@@ -908,6 +908,7 @@ class HAMM(AMM):
                        augment            = True,
                        n_reassignments    = None,
                        norm               = None,
+                       n_steps_mcmc       = None,
                        ):
         # Initialise the parent class
         super().__init__(models             = models,
@@ -928,6 +929,7 @@ class HAMM(AMM):
                          augment            = augment,
                          n_reassignments    = n_reassignments,
                          norm               = norm,
+                         n_steps_mcmc       = n_steps_mcmc,
                          )
         # Setting the hierarchical flag to True
         self.hierarchical = True
