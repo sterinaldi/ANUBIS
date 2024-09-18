@@ -558,12 +558,12 @@ class AMM:
                             for b in self.par_bounds]
         else:
             n_pars          = np.sum([len(b) for b in self.par_bounds])+len(self.shared_par_bounds)
-            self.all_bounds = np.array([bi for b in self.par_bounds for bi in b] + self.shared_par_bounds).reshape(-1,2)
+            self.all_bounds = np.array([bi for b in self.par_bounds for bi in b] + list(self.shared_par_bounds))
             self.sampler = EnsembleSampler(nwalkers    = 1,
                                            ndim        = n_pars,
                                            log_prob_fn = _joint_population_log_likelihood,
                                            args        = ([self]),
-                                           moves       = GaussianMove((np.diff(all_bounds).flatten()/20)**2),
+                                           moves       = GaussianMove((np.diff(self.all_bounds).flatten()/20)**2),
                                            )
         # Initialisation
         self.initialise()
@@ -811,14 +811,16 @@ class AMM:
             # In presence of shared parameters, the space is not separable anymore
             else:
                 # Joint distribution
-                log_total_p  = np.array([self.evaluated_logL[pt][self.assignations[pt]] for pt in range(int(np.sum(self.n_pts)))]).sum(0)
-                max_p        = self.par_draws[np.where(log_total_p == log_total_p.max())].flatten()
-                self.sampler.run_mcmc(initial_state            = initial_guess,
+                log_total_p  = np.array([self.evaluated_logL[pt][self.assignations[pt]] for pt in range(int(np.sum(self.n_pts)))]).sum(axis = 0)
+                max_idx      = np.where(log_total_p == log_total_p.max())
+                all_par      = [dd[max_idx].flatten() for dd in self.par_draws] + [self.shared_par_draws[max_idx].flatten()]
+                max_p        = np.array([par for par_vec in all_par for par in par_vec])
+                self.sampler.run_mcmc(initial_state            = max_p,
                                       nsteps                   = self.n_steps_mcmc,
                                       progress                 = False,
                                       skip_initial_state_check = True,
                                       )
-                pt = self.samplers[i].get_last_sample()[0][0]
+                pt = self.sampler.get_last_sample()[0][0]
                 # Unpack sample
                 if self.par_bounds is not None:
                     par_vals = []
@@ -831,7 +833,7 @@ class AMM:
                             par_vals.append([])
                 else:
                     par_vals = [[] for _ in range(len(self.par_models))]
-                shared_par_vals = pt[-self.n_shared_pars:]
+                shared_par_vals = pt[-len(self.shared_par_bounds):]
             # Build parametric models
             par_models = [par_model(m.model, list(par) + list(shared_par_vals), self.bounds, self.probit, hierarchical = True, selection_function = self.selfunc, inj_pdf = self.inj_pdf, n_total_inj = self.n_total_inj, norm = n) for m, par, n in zip(self.par_models, par_vals, self.norm)]
             # Renormalise the models in presence of selection effects
