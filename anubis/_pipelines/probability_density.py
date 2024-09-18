@@ -31,6 +31,7 @@ class worker:
                        n_total_inj        = None,
                        MC_draws_pars      = 1e3,
                        MC_draws_norm      = 5e3,
+                       MC_steps           = 1e3,
                        n_reassignments    = None,
                        gamma0             = None,
                        augment            = True,
@@ -65,6 +66,7 @@ class worker:
                            selection_function = selection_function,
                            inj_pdf            = inj_pdf,
                            n_total_inj        = n_total_inj,
+                           n_steps_mcmc       = MC_steps,
                            )
         self.samples = np.copy(samples)
         self.samples.setflags(write = True)

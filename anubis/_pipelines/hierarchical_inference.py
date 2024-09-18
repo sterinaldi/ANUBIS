@@ -41,6 +41,7 @@ class worker:
                        n_total_inj        = None,
                        MC_draws_pars      = 1e3,
                        MC_draws_norm      = 5e3,
+                       MC_steps           = 1e3,
                        n_reassignments    = None,
                        gamma0             = None,
                        augment            = True,
@@ -94,6 +95,7 @@ class worker:
                             selection_function = selection_function,
                             inj_pdf            = inj_pdf,
                             n_total_inj        = n_total_inj,
+                            n_steps_mcmc       = MC_steps,
                             )
     
     def run_event(self, pars):
@@ -191,6 +193,7 @@ def main():
     parser.add_option("--n_parallel", dest = "n_parallel", type = "int", help = "Number of parallel threads", default = 1)
     parser.add_option("--mc_draws_pars", dest = "MC_draws_pars", type = "int", help = "Number of draws for assignment MC integral over model parameters", default = None)
     parser.add_option("--mc_draws_norm", dest = "MC_draws_norm", type = "int", help = "Number of draws for MC normalisation integral", default = None)
+    parser.add_option("--mc_steps", dest = "MC_steps", type = "int", help = "Number of draws for MC normalisation integral", default = None)
     parser.add_option("--gamma0", dest = "gamma0", type = "float", help = "concentration parameter for Dirichlet prior on augmented mixture", default = None)
     parser.add_option("--rate", dest = "rate", action = 'store_true', help = "Compute rate", default = False)
     parser.add_option("--include_dvdz", dest = "include_dvdz", action = 'store_true', help = "Include dV/dz*(1+z)^{-1} term in selection effects.", default = False)
