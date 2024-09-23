@@ -860,8 +860,7 @@ class AMM:
             alphas = [m.alpha for m in par_models]
             if self.augment:
                 alphas = [nonpar.alpha_factor] + alphas
-            weights = np.array([a*np.sum(alphas/a) for a in alphas])
-            n_pts = np.nan_to_num(self.n_pts/weights, neginf = 0., posinf = 0., nan = 0.)
+            n_pts = np.nan_to_num(self.n_pts/np.array(alphas), neginf = 0., posinf = 0., nan = 0.)
         else:
             n_pts = self.n_pts
         return het_mixture(models, dirichlet(n_pts+self.gamma0).rvs()[0], self.bounds, self.augment, selfunc = self.selfunc, n_shared_pars = n_shared_pars, hierarchical = self.hierarchical)
