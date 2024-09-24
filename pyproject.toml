@@ -13,7 +13,7 @@ packages = ['anubis', 'anubis._pipelines']
 [project]
 name = 'anubis'
 description = 'ANUBIS'
-version = '0.5.0'
+version = '0.6.0'
 requires-python = '< 3.12'
 readme = {file = "README.md", content-type = "text/markdown"}
 license = {file = "LICENSE"}
@@ -44,7 +44,7 @@ dependencies = [
     "matplotlib != 3.6.3",
     "dill",
     "corner",
-    "figaro >= 1.4",
+    "figaro >= 1.7.0",
     "emcee"
     ]
 
