@@ -1,6 +1,6 @@
 import numpy as np
-from scipy.stats import dirichlet
-from scipy.stats import qmc, multivariate_normal as mn
+from scipy.stats import dirichlet, qmc, multivariate_normal as mn
+from scipy.special import logsumexp
 from emcee import EnsembleSampler, State
 from emcee.moves import GaussianMove, StretchMove
 
@@ -630,7 +630,7 @@ class AMM:
         for i in range(self.n_components):
             score, vals[i] = self._log_predictive_likelihood(x, i, pt_id)
             scores[i]      = score + np.log(self.gamma0[i] + self.n_pts[i])
-        scores             = np.exp(scores - logsumexp_jit(scores))
+        scores             = np.exp(scores - logsumexp(scores))
         id                 = np.random.choice(self.n_components, p = scores)
         self.n_pts[id]    += 1
         self.weights       = (self.n_pts + self.gamma0)/np.sum(self.n_pts + self.gamma0)
@@ -686,8 +686,8 @@ class AMM:
                 else:
                     log_p = self.evaluated_logL[pt_id][i]
                 log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0))
-                denom       = logsumexp_jit(log_total_p) - np.log(self.n_draws_pars)
-                v           = logsumexp_jit(log_p + log_total_p) - np.log(self.n_draws_pars)
+                denom       = logsumexp(log_total_p) - np.log(self.n_draws_pars)
+                v           = logsumexp(log_p + log_total_p) - np.log(self.n_draws_pars)
                 return np.nan_to_num(v - denom, nan = -np.inf, neginf = -np.inf), log_p
     
     @probit
@@ -715,7 +715,7 @@ class AMM:
                 scores[j]  = -np.inf
             else:
                 scores[j] += np.log(ss.N) - np.log(self.nonpar.n_pts + self.nonpar.alpha)
-        return logsumexp_jit(scores)
+        return logsumexp(scores)
     
     def add_new_point(self, x):
         """
@@ -939,8 +939,6 @@ class HAMM(AMM):
             model.hierarchical = True
         # (H)DPGMM initialisation (if required)
         if self.augment:
-            if selection_function is not None and not callable(selection_function):
-                print('Selection effects estimated with samples. Potential numerical instability for (H)DPGMM.')
             self.nonpar      = HDPGMM(bounds             = bounds,
                                       prior_pars         = prior_pars,
                                       alpha0             = alpha0,
@@ -980,8 +978,6 @@ class HAMM(AMM):
                     log_p = np.zeros(len(self.par_draws[i_p]))
                     if hasattr(self.components[i].alpha, '__iter__'):
                         for j, (p, sp, n) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws, self.components[i].alpha)):
-                            if np.isnan(n):
-                                print(p)
                             log_p[j] = np.log(np.mean(self.components[i].model(x['samples'], *p, *sp).flatten()/n))
                     else:
                         for j, (p, sp) in enumerate(zip(self.par_draws[i_p], self.shared_par_draws)):
@@ -989,8 +985,8 @@ class HAMM(AMM):
                 else:
                     log_p = self.evaluated_logL[pt_id][i]
                 log_total_p = np.atleast_1d(np.sum([self.evaluated_logL[pt][i] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i], axis = 0))
-                denom       = logsumexp_jit(log_total_p)
-                v           = logsumexp_jit(log_p + log_total_p)
+                denom       = logsumexp(log_total_p)
+                v           = logsumexp(log_p + log_total_p)
                 return np.nan_to_num(v - denom, nan = -np.inf, neginf = -np.inf), log_p
 
     def _log_predictive_mixture(self, x, logL_x = None):
@@ -1006,9 +1002,9 @@ class HAMM(AMM):
         scores = np.zeros(self.nonpar.n_cl + 1)
         if x['logL_x'] is None:
             if self.dim == 1:
-                logL_x = evaluate_mixture_MC_draws_1d(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w) - self.nonpar.log_alpha_factor
+                logL_x = evaluate_mixture_MC_draws_1d(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w) - self.nonpar.full_log_alpha_factor
             else:
-                logL_x = evaluate_mixture_MC_draws(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w) - self.nonpar.log_alpha_factor
+                logL_x = evaluate_mixture_MC_draws(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w) - self.nonpar.full_log_alpha_factor
             x['logL_x'] = logL_x
         else:
             logL_x = x['logL_x']
@@ -1019,12 +1015,12 @@ class HAMM(AMM):
             else:
                 ss     = self.nonpar.mixture[i]
                 logL_D = ss.logL_D
-            scores[j] = logsumexp_jit(logL_D + logL_x) - logsumexp_jit(logL_D)
+            scores[j] = logsumexp(logL_D + logL_x) - logsumexp(logL_D)
             if ss is None:
                 scores[j] += np.log(self.nonpar.alpha) - np.log(self.nonpar.n_pts + self.nonpar.alpha)
             else:
                 scores[j] += np.log(ss.N) - np.log(self.nonpar.n_pts + self.nonpar.alpha)
-        return logsumexp_jit(scores)
+        return logsumexp(scores)
     
     def add_new_point(self, ev):
         """
@@ -1055,7 +1051,7 @@ class HAMM(AMM):
         for i in range(self.n_components):
             score, vals[i] = self._log_predictive_likelihood(x, i, pt_id)
             scores[i]      = score + np.log(self.gamma0[i] + self.n_pts[i])
-        scores             = np.exp(scores - logsumexp_jit(scores))
+        scores             = np.exp(scores - logsumexp(scores))
         id                 = np.random.choice(self.n_components, p = scores)
         self.n_pts[id]    += 1
         self.weights       = (self.n_pts + self.gamma0)/np.sum(self.n_pts + self.gamma0)
