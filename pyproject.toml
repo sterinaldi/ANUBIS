@@ -44,7 +44,7 @@ dependencies = [
     "matplotlib != 3.6.3",
     "dill",
     "corner",
-    "figaro >= 1.7.0",
+    "figaro >= 1.7.1",
     "emcee"
     ]
 
