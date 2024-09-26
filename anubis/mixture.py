@@ -553,7 +553,7 @@ class AMM:
                                              ndim        = len(b),
                                              log_prob_fn = _population_log_likelihood,
                                              args        = ([self]),
-                                             moves       = GaussianMove((np.diff(b).flatten()/20)**2),
+                                             moves       = GaussianMove((np.diff(b).flatten()/100)**2),
                                              )
                             for b in self.par_bounds]
         else:
@@ -563,7 +563,7 @@ class AMM:
                                            ndim        = n_pars,
                                            log_prob_fn = _joint_population_log_likelihood,
                                            args        = ([self]),
-                                           moves       = GaussianMove((np.diff(self.all_bounds).flatten()/20)**2),
+                                           moves       = GaussianMove((np.diff(self.all_bounds).flatten()/100)**2),
                                            )
         # Initialisation
         self.initialise()
