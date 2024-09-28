@@ -211,7 +211,7 @@ def main():
         raise Exception("Please provide path to samples.")
     if options.models is not None:
         options.models = Path(options.models).resolve()
-    elif options.models is not None:
+    elif options.config is not None:
         options.models = Path('.').resolve()
     else:
         raise Exception("Please provide module with parametric model(s) definition.")
