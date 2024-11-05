@@ -559,7 +559,7 @@ class AMM:
                                              moves       = GaussianMove((np.diff(b).flatten()/20)**2),
                                              )
                             for b in self.par_bounds]
-            for i, b in enumerate(self.par_bounds)
+            for i, b in enumerate(self.par_bounds):
                 self.samplers[i].sample(initial_state = np.mean(b, axis = 1).flatten())
         else:
             n_pars          = np.sum([len(b) for b in self.par_bounds])+len(self.shared_par_bounds)
