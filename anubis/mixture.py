@@ -560,6 +560,7 @@ class AMM:
                                              )
                             for b in self.par_bounds]
             for i, b in enumerate(self.par_bounds):
+                self.model_to_sample = i
                 self.samplers[i].run_mcmc(initial_state            = np.mean(b, axis = 1).flatten(),
                                           nsteps                   = 1,
                                           progress                 = False,
