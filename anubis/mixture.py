@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.stats import dirichlet, qmc, multivariate_normal as mn
 from scipy.special import logsumexp
-from emcee import EnsembleSampler, State
+from emcee import EnsembleSampler
 from emcee.moves import GaussianMove, StretchMove
 
 from anubis.exceptions import ANUBISException
@@ -32,7 +32,10 @@ class uniform:
         self.volume       = np.prod(np.diff(self.bounds, axis = 1))
         self.dim          = len(self.bounds)
         self.alpha_factor = 1.
-        
+    
+    def __call__(self, x):
+        return self.pdf(x)
+    
     def pdf(self, x):
         x = np.atleast_1d(x)
         return np.ones(len(x))/self.volume
@@ -556,6 +559,8 @@ class AMM:
                                              moves       = GaussianMove((np.diff(b).flatten()/20)**2),
                                              )
                             for b in self.par_bounds]
+            for i, b in enumerate(self.par_bounds)
+                self.samplers[i].sample(initial_state = np.mean(b, axis = 1).flatten())
         else:
             n_pars          = np.sum([len(b) for b in self.par_bounds])+len(self.shared_par_bounds)
             self.all_bounds = np.array([bi for b in self.par_bounds for bi in b] + list(self.shared_par_bounds))
@@ -565,6 +570,7 @@ class AMM:
                                            args        = ([self]),
                                            moves       = GaussianMove((np.diff(self.all_bounds).flatten()/20)**2),
                                            )
+            self.sampler.sample(initial_state = np.mean(self.all_bounds, axis = 1).flatten())
         # Initialisation
         self.initialise()
     
@@ -799,8 +805,8 @@ class AMM:
                         log_total_p          = np.atleast_1d(np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0))
                         max_p                = self.par_draws[i][np.where(log_total_p == log_total_p.max())].flatten()
                         self.model_to_sample = i
-                        self.samplers[i].run_mcmc(initial_state            = max_p,
-                                                  nsteps                   = self.n_steps_mcmc,
+#                        self.samplers[i].run_mcmc(initial_state            = max_p,
+                        self.samplers[i].run_mcmc(nsteps                   = self.n_steps_mcmc,
                                                   progress                 = False,
                                                   skip_initial_state_check = True,
                                                   )
@@ -815,8 +821,8 @@ class AMM:
                 max_idx      = np.where(log_total_p == log_total_p.max())
                 all_par      = [dd[max_idx].flatten() for dd in self.par_draws] + [self.shared_par_draws[max_idx].flatten()]
                 max_p        = np.array([par for par_vec in all_par for par in par_vec])
-                self.sampler.run_mcmc(initial_state            = max_p,
-                                      nsteps                   = self.n_steps_mcmc,
+#                self.sampler.run_mcmc(initial_state            = max_p,
+                self.sampler.run_mcmc(nsteps                   = self.n_steps_mcmc,
                                       progress                 = False,
                                       skip_initial_state_check = True,
                                       )
