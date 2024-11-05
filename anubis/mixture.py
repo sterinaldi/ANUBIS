@@ -560,7 +560,11 @@ class AMM:
                                              )
                             for b in self.par_bounds]
             for i, b in enumerate(self.par_bounds):
-                self.samplers[i].sample(initial_state = np.mean(b, axis = 1).flatten())
+                self.samplers[i].run_mcmc(initial_state            = np.mean(b, axis = 1).flatten(),
+                                          nsteps                   = 1,
+                                          progress                 = False,
+                                          skip_initial_state_check = True,
+                                          )
         else:
             n_pars          = np.sum([len(b) for b in self.par_bounds])+len(self.shared_par_bounds)
             self.all_bounds = np.array([bi for b in self.par_bounds for bi in b] + list(self.shared_par_bounds))
@@ -570,7 +574,11 @@ class AMM:
                                            args        = ([self]),
                                            moves       = GaussianMove((np.diff(self.all_bounds).flatten()/20)**2),
                                            )
-            self.sampler.sample(initial_state = np.mean(self.all_bounds, axis = 1).flatten())
+            self.sampler.run_mcmc(initial_state            = np.mean(self.all_bounds, axis = 1).flatten(),
+                                  nsteps                   = 1,
+                                  progress                 = False,
+                                  skip_initial_state_check = True,
+                                  )
         # Initialisation
         self.initialise()
     
