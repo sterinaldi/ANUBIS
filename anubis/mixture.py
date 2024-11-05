@@ -551,6 +551,7 @@ class AMM:
             self.n_steps_mcmc = int(1e3)
         else:
             self.n_steps_mcmc = int(n_steps_mcmc)
+        self.first_run = True
         if self.shared_par_bounds is None:
             self.samplers = [EnsembleSampler(nwalkers    = 1,
                                              ndim        = len(b),
@@ -559,13 +560,6 @@ class AMM:
                                              moves       = GaussianMove((np.diff(b).flatten()/20)**2),
                                              )
                             for b in self.par_bounds]
-            for i, b in enumerate(self.par_bounds):
-                self.model_to_sample = i
-                self.samplers[i].run_mcmc(initial_state            = np.mean(b, axis = 1).flatten(),
-                                          nsteps                   = 1,
-                                          progress                 = False,
-                                          skip_initial_state_check = True,
-                                          )
         else:
             n_pars          = np.sum([len(b) for b in self.par_bounds])+len(self.shared_par_bounds)
             self.all_bounds = np.array([bi for b in self.par_bounds for bi in b] + list(self.shared_par_bounds))
@@ -575,11 +569,6 @@ class AMM:
                                            args        = ([self]),
                                            moves       = GaussianMove((np.diff(self.all_bounds).flatten()/20)**2),
                                            )
-            self.sampler.run_mcmc(initial_state            = np.mean(self.all_bounds, axis = 1).flatten(),
-                                  nsteps                   = 1,
-                                  progress                 = False,
-                                  skip_initial_state_check = True,
-                                  )
         # Initialisation
         self.initialise()
     
@@ -814,7 +803,11 @@ class AMM:
                         log_total_p          = np.atleast_1d(np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0))
                         max_p                = self.par_draws[i][np.where(log_total_p == log_total_p.max())].flatten()
                         self.model_to_sample = i
-                        self.samplers[i].run_mcmc(initial_state            = None, # max_p,
+                        if self.first_run:
+                            initial_state = np.mean(self.par_bounds[i], axis = 1).flatten()
+                        else:
+                            initial_state = None
+                        self.samplers[i].run_mcmc(initial_state            = initial_state, # max_p,
                                                   nsteps                   = self.n_steps_mcmc,
                                                   progress                 = False,
                                                   skip_initial_state_check = True,
@@ -823,6 +816,7 @@ class AMM:
                     else:
                         par_vals.append([])
                 shared_par_vals = []
+                self.first_run = False
             # In presence of shared parameters, the space is not separable anymore
             else:
                 # Joint distribution
@@ -830,12 +824,17 @@ class AMM:
                 max_idx      = np.where(log_total_p == log_total_p.max())
                 all_par      = [dd[max_idx].flatten() for dd in self.par_draws] + [self.shared_par_draws[max_idx].flatten()]
                 max_p        = np.array([par for par_vec in all_par for par in par_vec])
-                self.sampler.run_mcmc(initial_state            = None, # max_p,
+                if self.first_run:
+                    initial_state = np.mean(self.all_bounds, axis = 1).flatten()
+                else:
+                    initial_state = None
+                self.sampler.run_mcmc(initial_state            = initial_state, # max_p,
                                       nsteps                   = self.n_steps_mcmc,
                                       progress                 = False,
                                       skip_initial_state_check = True,
                                       )
                 pt = self.sampler.get_last_sample()[0][0]
+                self.first_run = False
                 # Unpack sample
                 if self.par_bounds is not None:
                     par_vals = []
