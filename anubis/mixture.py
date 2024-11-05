@@ -805,8 +805,8 @@ class AMM:
                         log_total_p          = np.atleast_1d(np.sum([self.evaluated_logL[pt][i_p] for pt in range(int(np.sum(self.n_pts))) if self.assignations[pt] == i_p], axis = 0))
                         max_p                = self.par_draws[i][np.where(log_total_p == log_total_p.max())].flatten()
                         self.model_to_sample = i
-#                        self.samplers[i].run_mcmc(initial_state            = max_p,
-                        self.samplers[i].run_mcmc(nsteps                   = self.n_steps_mcmc,
+                        self.samplers[i].run_mcmc(initial_state            = None, # max_p,
+                                                  nsteps                   = self.n_steps_mcmc,
                                                   progress                 = False,
                                                   skip_initial_state_check = True,
                                                   )
@@ -821,8 +821,8 @@ class AMM:
                 max_idx      = np.where(log_total_p == log_total_p.max())
                 all_par      = [dd[max_idx].flatten() for dd in self.par_draws] + [self.shared_par_draws[max_idx].flatten()]
                 max_p        = np.array([par for par_vec in all_par for par in par_vec])
-#                self.sampler.run_mcmc(initial_state            = max_p,
-                self.sampler.run_mcmc(nsteps                   = self.n_steps_mcmc,
+                self.sampler.run_mcmc(initial_state            = None, # max_p,
+                                      nsteps                   = self.n_steps_mcmc,
                                       progress                 = False,
                                       skip_initial_state_check = True,
                                       )
