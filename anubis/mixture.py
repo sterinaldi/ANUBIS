@@ -214,13 +214,13 @@ class par_model:
                 self.sf_samples = self.selfunc(self.samples).flatten()
             if pars is not None:
                 self.alpha = np.nan_to_num(np.atleast_1d([np.mean(self.model(self.samples, *p, *sp).flatten()*self.sf_samples*self.volume) for p, sp in zip(pars, shared_pars)]), neginf = np.inf, nan = np.inf)
-                self.alpha[self.alpha < 1e-10] = np.inf
+                self.alpha[self.alpha < 1e-5] = np.inf
             else:
                 self.alpha = np.atleast_1d(np.mean(self.pdf(self.samples)*self.sf_samples*self.volume))
         else:
             if pars is not None:
                 self.alpha = np.nan_to_num(np.atleast_1d([np.sum(self.model(self.selfunc, *p, *sp).flatten()/self.inj_pdf)/self.n_total_inj for p, sp in zip(pars, shared_pars)]), neginf = np.inf, nan = np.inf)
-                self.alpha[self.alpha < 1e-10] = np.inf
+                self.alpha[self.alpha < 1e-5] = np.inf
             else:
                 self.alpha = np.atleast_1d(np.sum(self.pdf(self.selfunc).flatten())/self.n_total_inj)
         if len(self.alpha) == 1:
