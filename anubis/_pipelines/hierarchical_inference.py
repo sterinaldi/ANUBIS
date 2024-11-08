@@ -334,11 +334,12 @@ def main():
         for i, ev in enumerate(events):
             events[i] = ev[np.where((np.prod(options.bounds[:,0] < ev, axis = 1) & np.prod(ev < options.bounds[:,1], axis = 1)))]
         if hasattr(dec_selfunc, '__iter__'):
-            idx         = np.where((np.prod(options.bounds[:,0] < selfunc, axis = 1) & np.prod(selfunc < options.bounds[:,1], axis = 1)))
+            n_initial   = len(dec_selfunc)
+            idx         = np.where((np.prod(options.bounds[:,0] < dec_selfunc, axis = 1) & np.prod(dec_selfunc < options.bounds[:,1], axis = 1)))
             dec_selfunc = np.copy(dec_selfunc[idx])
             inj_pdf     = np.copy(inj_pdf[idx])
-            if (len(selfunc) - np.sum(idx))/len(selfunc) > 0.01:
-                print("More than 1% of the injections are outside the bounds")
+            if (n_initial - np.sum(idx))/n_initial > 0.01:
+                print("More than 1% of the injections are outside the given bounds")
     else:
         # Check if all samples are within bounds
         all_samples = np.atleast_2d(np.concatenate(events))

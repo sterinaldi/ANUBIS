@@ -207,6 +207,13 @@ def main():
             dim = 1
         if options.exclude_points:
             samples = samples[np.where((np.prod(options.bounds[:,0] < samples, axis = 1) & np.prod(samples < options.bounds[:,1], axis = 1)))]
+            if hasattr(selfunc, '__iter__'):
+                n_initial = len(selfunc)
+                idx       = np.where((np.prod(options.bounds[:,0] < selfunc, axis = 1) & np.prod(selfunc < options.bounds[:,1], axis = 1)))
+                selfunc   = np.copy(selfunc[idx])
+                inj_pdf   = np.copy(inj_pdf[idx])
+                if (n_initial - np.sum(idx))/n_initial > 0.01:
+                    print("More than 1% of the injections are outside the given bounds")
         else:
             # Check if all samples are within bounds
             if options.probit:
