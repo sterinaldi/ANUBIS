@@ -194,7 +194,7 @@ def main():
     parser.add_option("--mc_draws_pars", dest = "MC_draws_pars", type = "int", help = "Number of draws for assignment MC integral over model parameters", default = None)
     parser.add_option("--mc_draws_norm", dest = "MC_draws_norm", type = "int", help = "Number of draws for MC normalisation integral", default = None)
     parser.add_option("--mc_steps", dest = "MC_steps", type = "int", help = "Number of draws for MC normalisation integral", default = None)
-    parser.add_option("--gamma0", dest = "gamma0", type = "float", help = "concentration parameter for Dirichlet prior on augmented mixture", default = None)
+    parser.add_option("--gamma0", dest = "gamma0", type = "string", help = "Concentration parameter for Dirichlet prior on augmented mixture", default = None)
     parser.add_option("--rate", dest = "rate", action = 'store_true', help = "Compute rate", default = False)
     parser.add_option("--include_dvdz", dest = "include_dvdz", action = 'store_true', help = "Include dV/dz*(1+z)^{-1} term in selection effects.", default = False)
 
@@ -260,6 +260,9 @@ def main():
         options.sigma_prior = np.array([float(s) for s in options.sigma_prior.split(',')])
     if options.se_sigma_prior is not None:
         options.se_sigma_prior = np.array([float(s) for s in options.se_sigma_prior.split(',')])
+    # Read gamma0 prior
+    if options.gamma0 is not None:
+        options.gamma0 = np.array([float(s) for s in options.gamma0.split(',')])
     # Cosmology
     if options.cosmology == 'Planck18':
         approx_dVdz = dVdz_approx_planck18

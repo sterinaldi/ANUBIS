@@ -110,7 +110,7 @@ def main():
     parser.add_option("--n_parallel", dest = "n_parallel", type = "int", help = "Number of parallel threads", default = 1)
     parser.add_option("--mc_draws_pars", dest = "MC_draws_pars", type = "int", help = "Number of draws for assignment MC integral over model parameters", default = None)
     parser.add_option("--mc_draws_norm", dest = "MC_draws_norm", type = "int", help = "Number of draws for MC normalisation integral", default = None)
-    parser.add_option("--gamma0", dest = "gamma0", type = "float", help = "concentration parameter for Dirichlet prior on augmented mixture", default = None)
+    parser.add_option("--gamma0", dest = "gamma0", type = "string", help = "Concentration parameter for Dirichlet prior on augmented mixture", default = None)
 
     (options, args) = parser.parse_args()
 
@@ -173,7 +173,10 @@ def main():
         options.true_weights = [float(eval(w)) for w in options.true_weights.split(',')]
         if options.augment:
             options.true_weights = [1.-np.sum(options.true_weights)] + options.true_weights
-        
+    # Read gamma0 prior
+    if options.gamma0 is not None:
+        options.gamma0 = np.array([float(s) for s in options.gamma0.split(',')])
+    
     if options.input.is_file():
         files = [options.input]
         output_draws = options.output
