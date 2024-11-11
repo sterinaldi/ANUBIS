@@ -807,7 +807,7 @@ class AMM:
                             initial_state = np.mean(self.par_bounds[i], axis = 1).flatten()
                         else:
                             initial_state = None
-                        self.samplers[i].run_mcmc(initial_state            = initial_state, # max_p,
+                        self.samplers[i].run_mcmc(initial_state            = max_p, #initial_state, # max_p,
                                                   nsteps                   = self.n_steps_mcmc,
                                                   progress                 = False,
                                                   skip_initial_state_check = True,
@@ -828,7 +828,7 @@ class AMM:
                     initial_state = np.mean(self.all_bounds, axis = 1).flatten()
                 else:
                     initial_state = None
-                self.sampler.run_mcmc(initial_state            = initial_state, # max_p,
+                self.sampler.run_mcmc(initial_state            = max_p, #initial_state, # max_p,
                                       nsteps                   = self.n_steps_mcmc,
                                       progress                 = False,
                                       skip_initial_state_check = True,
