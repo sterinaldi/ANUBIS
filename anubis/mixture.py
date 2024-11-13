@@ -69,9 +69,9 @@ class nonpar_model:
         self.probit = self.mixture.probit
         if self.selfunc is not None:
             if self.hierarchical:
-                self.alpha = 1./self.mixture.alpha_factor
+                self.alpha = self.mixture.alpha_factor
             else:
-                self.alpha = np.mean(1./self.selfunc(self.mixture.rvs(size = int((self.mixture.dim+1)*1e3))))
+                self.alpha = np.mean(self.selfunc(self.mixture.rvs(size = int((self.mixture.dim+1)*1e3))))
     
     def __call__(self, x):
         return self.pdf(x)
