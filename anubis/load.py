@@ -83,6 +83,8 @@ def load_density(folder, name, models, selection_function = None, make_comp = Tr
     if not info['selection_function'] and selection_function is not None:
         print("Selection function ignored.")
     info['bounds'] = np.atleast_2d(info['bounds'])
+    if isinstance(models, (str, Path)):
+        models, _, _, _, _ = load_models(models)
     # Join list of parameter names
     for model in models:
         model['samples'] = np.array([samples[l] for l in model['par_names']]).T

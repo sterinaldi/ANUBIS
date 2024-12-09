@@ -246,7 +246,7 @@ def plot_samples(draws, plot = 'joint', out_folder = '.', models = None, true_pa
         if true_weights is None:
             true_weights = [None for _ in range(len(draws[0].models))]
         true_vals = true_pars + true_weights
-        
+
         c = corner(samples, labels = joint_labels, truths = true_vals, quantiles = [0.16, 0.5, 0.84], show_titles = True, quiet = True)
         c.savefig(Path(out_folder, plot_name), bbox_inches = 'tight')
         plt.close(c)

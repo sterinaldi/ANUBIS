@@ -214,13 +214,13 @@ class par_model:
                 self.sf_samples = self.selfunc(self.samples).flatten()
             if pars is not None:
                 self.alpha = np.nan_to_num(np.atleast_1d([np.mean(self.model(self.samples, *p, *sp).flatten()*self.sf_samples*self.volume) for p, sp in zip(pars, shared_pars)]), neginf = np.inf, nan = np.inf)
-                self.alpha[self.alpha < 1e-4] = np.inf
+                self.alpha[self.alpha < 1e-5] = np.inf
             else:
                 self.alpha = np.atleast_1d(np.mean(self.pdf(self.samples)*self.sf_samples*self.volume))
         else:
             if pars is not None:
                 self.alpha = np.nan_to_num(np.atleast_1d([np.sum(self.model(self.selfunc, *p, *sp).flatten()/self.inj_pdf)/self.n_total_inj for p, sp in zip(pars, shared_pars)]), neginf = np.inf, nan = np.inf)
-                self.alpha[self.alpha < 1e-4] = np.inf
+                self.alpha[self.alpha < 1e-5] = np.inf
             else:
                 self.alpha = np.atleast_1d(np.sum(self.pdf(self.selfunc).flatten())/self.n_total_inj)
         if len(self.alpha) == 1:
@@ -712,7 +712,10 @@ class AMM:
                 scores[j] = -np.log(self.volume)
             else:
                 ss = self.nonpar.mixture[i]
-                scores[j] = self.nonpar._log_predictive_likelihood(x, ss)
+                if ss.N < 1:
+                    scores[j] = 0.
+                else:
+                    scores[j] = self.nonpar._log_predictive_likelihood(x, ss)
             if ss is None:
                 scores[j] += np.log(self.nonpar.alpha) - np.log(self.nonpar.n_pts + self.nonpar.alpha)
             elif ss.N < 1:
@@ -750,7 +753,7 @@ class AMM:
         """
         np.random.shuffle(samples)
         if self.n_reassignments is None:
-            n_reassignments = 10*len(samples)
+            n_reassignments = 5*len(samples)
         else:
             n_reassignments = self.n_reassignments
         for s in samples:
@@ -820,7 +823,7 @@ class AMM:
             # In presence of shared parameters, the space is not separable anymore
             else:
                 # Joint distribution
-                log_total_p  = np.array([self.evaluated_logL[pt][self.assignations[pt]] for pt in range(int(np.sum(self.n_pts)))]).sum(axis = 0)
+                log_total_p  = np.array([self.evaluated_logL[pt][self.assignations[pt]] for pt in range(int(np.sum(self.n_pts))) if pt in self.evaluated_logL.keys()]).sum(axis = 0)
                 max_idx      = np.where(log_total_p == log_total_p.max())
                 all_par      = [dd[max_idx].flatten() for dd in self.par_draws] + [self.shared_par_draws[max_idx].flatten()]
                 max_p        = np.array([par for par_vec in all_par for par in par_vec])
@@ -1065,8 +1068,11 @@ class HAMM(AMM):
         for i in range(self.n_components):
             score, vals[i] = self._log_predictive_likelihood(x, i, pt_id)
             scores[i]      = score + np.log(self.gamma0[i] + self.n_pts[i])
-        scores             = np.exp(scores - logsumexp(scores))
-        id                 = np.random.choice(self.n_components, p = scores)
+        if np.sum(self.n_pts) == 0 and self.augment:
+            id = 0
+        else:
+            scores             = np.exp(scores - logsumexp(scores))
+            id                 = np.random.choice(self.n_components, p = scores)
         self.n_pts[id]    += 1
         self.weights       = (self.n_pts + self.gamma0)/np.sum(self.n_pts + self.gamma0)
         # If DPGMM, updates mixture
