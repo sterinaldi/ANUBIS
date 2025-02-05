@@ -71,7 +71,7 @@ class nonpar_model:
             if self.hierarchical:
                 self.alpha = self.mixture.alpha_factor
             else:
-                self.alpha = np.mean(self.selfunc(self.mixture.rvs(size = int((self.mixture.dim+1)*1e3))))
+                self.alpha = np.mean(self.selfunc(self.mixture.rvs(size = int((self.mixture.dim+1)*1e5))))
     
     def __call__(self, x):
         return self.pdf(x)
@@ -90,7 +90,7 @@ class nonpar_model:
             return self.mixture.pdf(x)
         else:
             with np.errstate(divide = 'ignore', invalid = 'ignore'):
-                return np.nan_to_num(self.mixture.pdf(x)/self.selfunc(x)*self.alpha, nan = 0., posinf = 0., neginf = 0.)
+                return np.nan_to_num(self.mixture.pdf(x), nan = 0., posinf = 0., neginf = 0.)
     
     def logpdf(self, x):
         """
@@ -106,7 +106,7 @@ class nonpar_model:
             return self.mixture.logpdf(x)
         else:
             with np.errstate(divide = 'ignore', invalid = 'ignore'):
-                return np.nan_to_num(self.mixture.logpdf(x) - np.log(self.selfunc(x)) + np.log(self.alpha), nan = -np.inf, posinf = -np.inf)
+                return np.nan_to_num(self.mixture.logpdf(x), nan = -np.inf, posinf = -np.inf)
     
     def pdf_observed(self, x):
         """
@@ -214,15 +214,17 @@ class par_model:
                 self.sf_samples = self.selfunc(self.samples).flatten()
             if pars is not None:
                 self.alpha = np.nan_to_num(np.atleast_1d([np.mean(self.model(self.samples, *p, *sp).flatten()*self.sf_samples*self.volume) for p, sp in zip(pars, shared_pars)]), neginf = np.inf, nan = np.inf)
-                self.alpha[self.alpha < 1e-5] = np.inf
+                self.alpha[self.alpha < 1e-3] = np.inf
             else:
                 self.alpha = np.atleast_1d(np.mean(self.pdf(self.samples)*self.sf_samples*self.volume))
         else:
             if pars is not None:
                 self.alpha = np.nan_to_num(np.atleast_1d([np.sum(self.model(self.selfunc, *p, *sp).flatten()/self.inj_pdf)/self.n_total_inj for p, sp in zip(pars, shared_pars)]), neginf = np.inf, nan = np.inf)
-                self.alpha[self.alpha < 1e-5] = np.inf
+                var = np.nan_to_num(np.atleast_1d([np.sum(self.model(self.selfunc, *p, *sp).flatten()**2/self.inj_pdf**2)/self.n_total_inj**2 - a**2/self.n_total_inj for a, p, sp in zip(self.alpha, pars, shared_pars)]), neginf = np.inf, nan = np.inf)
+#                self.alpha[self.alpha < 1e-3] = np.inf
+                self.alpha[np.sqrt(var)/self.alpha > 0.05] = np.inf
             else:
-                self.alpha = np.atleast_1d(np.sum(self.pdf(self.selfunc).flatten())/self.n_total_inj)
+                self.alpha = np.atleast_1d(np.sum(self.pdf(self.selfunc).flatten()/self.inj_pdf)/self.n_total_inj)
         if len(self.alpha) == 1:
             self.alpha = self.alpha[0]
     
@@ -340,6 +342,8 @@ class het_mixture:
             else:
                 self.intrinsic_weights = self.weights
                 self.observed_weights  = np.array([wi*mi.alpha for wi, mi in zip(self.weights, self.models)])
+                #if not np.isfinite(self.observed_weights).all():
+                    #print(self.observed_weights, [mi.alpha for mi in self.models])
                 self.observed_weights /= np.sum(self.observed_weights)
         else:
             self.intrinsic_weights = self.weights
@@ -810,7 +814,7 @@ class AMM:
                             initial_state = np.mean(self.par_bounds[i], axis = 1).flatten()
                         else:
                             initial_state = None
-                        self.samplers[i].run_mcmc(initial_state            = max_p, #initial_state, # max_p,
+                        self.samplers[i].run_mcmc(initial_state            = max_p,
                                                   nsteps                   = self.n_steps_mcmc,
                                                   progress                 = False,
                                                   skip_initial_state_check = True,
@@ -831,7 +835,7 @@ class AMM:
                     initial_state = np.mean(self.all_bounds, axis = 1).flatten()
                 else:
                     initial_state = None
-                self.sampler.run_mcmc(initial_state            = max_p, #initial_state, # max_p,
+                self.sampler.run_mcmc(initial_state            = max_p,
                                       nsteps                   = self.n_steps_mcmc,
                                       progress                 = False,
                                       skip_initial_state_check = True,
@@ -1019,9 +1023,9 @@ class HAMM(AMM):
         scores = np.zeros(self.nonpar.n_cl + 1)
         if x['logL_x'] is None:
             if self.dim == 1:
-                logL_x = evaluate_mixture_MC_draws_1d(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w) - self.nonpar.full_log_alpha_factor
+                logL_x = evaluate_mixture_MC_draws_1d(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w) - self.nonpar.log_alpha_factor
             else:
-                logL_x = evaluate_mixture_MC_draws(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w) - self.nonpar.full_log_alpha_factor
+                logL_x = evaluate_mixture_MC_draws(self.nonpar.mu_MC, self.nonpar.sigma_MC, x['mix'].means, x['mix'].covs, x['mix'].w) - self.nonpar.log_alpha_factor
             x['logL_x'] = logL_x
         else:
             logL_x = x['logL_x']
@@ -1071,7 +1075,10 @@ class HAMM(AMM):
         if np.sum(self.n_pts) == 0 and self.augment:
             id = 0
         else:
-            scores             = np.exp(scores - logsumexp(scores))
+            if len(scores) > 1:
+                scores             = np.exp(scores - logsumexp(scores))
+            else:
+                scores = [1.]
             id                 = np.random.choice(self.n_components, p = scores)
         self.n_pts[id]    += 1
         self.weights       = (self.n_pts + self.gamma0)/np.sum(self.n_pts + self.gamma0)
