@@ -214,9 +214,9 @@ class par_model:
                 self.sf_samples = self.selfunc(self.samples).flatten()
             if pars is not None:
                 self.alpha = np.nan_to_num(np.atleast_1d([np.mean(self.model(self.samples, *p, *sp).flatten()*self.sf_samples*self.volume) for p, sp in zip(pars, shared_pars)]), neginf = np.inf, nan = np.inf)
-                var        = np.nan_to_num(np.atleast_1d([np.mean((self.model(self.samples, *p, *sp).flatten()*self.sf_samples*self.volume)**2)/n_draws**2 - a**2/n_draws for a, p, sp in zip(self.alpha, pars, shared_pars)]), neginf = np.inf, nan = np.inf)
+                var        = np.nan_to_num(np.atleast_1d([np.mean((self.model(self.samples, *p, *sp).flatten()*self.sf_samples*self.volume)**2)/n_draws - a**2/n_draws for a, p, sp in zip(self.alpha, pars, shared_pars)]), neginf = np.inf, nan = np.inf)
                 self.alpha[self.alpha < 1e-3] = np.inf
-                self.alpha[np.sqrt(var)/self.alpha > 0.05] = np.inf
+                self.alpha[(np.sqrt(var)/self.alpha > 0.05) & (self.alpha < 1.)] = np.inf
             else:
                 self.alpha = np.atleast_1d(np.mean(self.pdf(self.samples)*self.sf_samples*self.volume))
         else:
@@ -224,7 +224,7 @@ class par_model:
                 self.alpha = np.nan_to_num(np.atleast_1d([np.sum(self.model(self.selfunc, *p, *sp).flatten()/self.inj_pdf)/self.n_total_inj for p, sp in zip(pars, shared_pars)]), neginf = np.inf, nan = np.inf)
                 var = np.nan_to_num(np.atleast_1d([np.sum(self.model(self.selfunc, *p, *sp).flatten()**2/self.inj_pdf**2)/self.n_total_inj**2 - a**2/self.n_total_inj for a, p, sp in zip(self.alpha, pars, shared_pars)]), neginf = np.inf, nan = np.inf)
                 self.alpha[self.alpha < 1e-3] = np.inf
-                self.alpha[np.sqrt(var)/self.alpha > 0.05] = np.inf
+                self.alpha[(np.sqrt(var)/self.alpha > 0.05) & (self.alpha != 1)] = np.inf
             else:
                 self.alpha = np.atleast_1d(np.sum(self.pdf(self.selfunc).flatten()/self.inj_pdf)/self.n_total_inj)
         if len(self.alpha) == 1:
